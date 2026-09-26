@@ -2,7 +2,7 @@
 
 ## Acceptance target
 
-User requested profile -> modlist -> fresh profile, with Cyberpunk immediately playable; the exact personal configuration is not the product requirement. Current implementation is a private installed-output snapshot, leaving remote source reconstruction as a later layer.
+User requested profile -> modlist -> fresh profile, with Cyberpunk immediately playable; the exact personal configuration is not the product requirement. Current implementation locks installed outputs, reconstructs matching content from pinned archives, and retains local changes in a private bundle.
 
 ## Implemented
 
@@ -41,5 +41,18 @@ Packaged the extension as `artifacts/MO2-Modlists-0.1.0.zip`, with a SHA-256 sid
 
 1. Finish gameplay acceptance (save loading and movement); preview packaging is complete.
 2. Broaden profile/layout/settings support and add strict JSON schemas, import locking and hard-crash recovery.
-3. Add source-backed exports with Nexus file IDs/GitHub asset identities, fetching and cache reuse. Represent installer deltas/generated configuration explicitly so a small manifest can reconstruct common mods without bundling their entire installed outputs.
+3. Validate a live Nexus download through MO2 and broaden automatic GitHub provenance discovery. Source-backed exports, archive member recipes and cache reuse are implemented below.
 4. Add native dependency metadata normalization and the shared resolver, using supplemental recipes only where necessary.
+
+## Source reconstruction follow-up (0.2.0)
+
+- Added archive-member matching, compact source-backed locks and hydration of exact installed output; FOMOD selections are preserved by output/member mappings.
+- Real export matched 208 distinct blobs to 15 original archives. The initial compact bundle retained 894,921,687 bytes instead of 1,373,260,517 bytes (the remainder is modified/generated/unmapped content).
+- Reconstructed all 208 missing blobs with an empty source cache: eight GitHub release assets were newly downloaded and seven Nexus archives came from existing MO2 downloads. All final file hashes passed verification. No new Nexus account/API credentials were accessed.
+- Added the MO2 download-manager bridge for missing pinned Nexus archives; callbacks register successfully in the real MO2 host (probe v5), and the core verifies callback-supplied content in a fixture test. A live authenticated Nexus transfer is not yet proven.
+- UI export now attempts compaction using source archives; UI import hydrates missing content before deployment. Optional settings provide additional archive directories/GitHub source catalog. CLI `compact`, `hydrate` and automatic import hydration expose the same pipeline.
+- Fourteen tests pass. New tests cover selected variant reconstruction, retained local changes, changed archives, unsafe members, Nexus acquisition hash verification and the source-export wrapper's temporary snapshot cleanup.
+- Imported the reconstructed real bundle into `Source-backed - Roundtrip`. The first attempt correctly rejected runtime-generated conflicting overwrite from the earlier game launch. Preserved that disposable instance's overwrite as `overwrite-before-source-roundtrip`, created an empty overwrite and retried successfully.
+- Verified all 429 managed files across 17 layers in that source-backed import, with zero mismatches and matching priority (`artifacts/source-roundtrip-verification.json`). Version 0.2.0 is deployed only in the disposable MO2 instance and packaged as `artifacts/MO2-Modlists-0.2.0.zip` (SHA-256 `6d519507023d8b65076b278b5e50ffbc8c4bf95ff427fd08d83a67e05068a1bf`).
+- Root/overwrite inventories contain some save copies left by the existing setup under game/mod directories. Standard user save folders are not collected, but this generic snapshot includes those nested copies. Bundles must be treated as private; automatic classification of such leftovers remains future work.
+- Save loading/movement acceptance remains pending. The source-backed pipeline does not imply the broader dependency resolver is complete.

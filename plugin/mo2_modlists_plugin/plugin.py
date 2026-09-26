@@ -1,14 +1,20 @@
 from pathlib import Path
 import json
 import traceback
+import threading
 
 import mobase
-from PyQt6.QtCore import QThread, pyqtSignal, Qt
+from PyQt6.QtCore import QObject, QThread, pyqtSignal, Qt
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QPushButton, QFileDialog,
                             QInputDialog, QMessageBox, QProgressDialog, QPlainTextEdit)
 
 from .mo2_modlists.core import PackError, export_profile, import_profile, load_bundle
+from .mo2_modlists.sources import hydrate_bundle, export_source_profile
+
+
+class NexusBridge(QObject):
+    request = pyqtSignal(object)
 
 
 class Worker(QThread):
@@ -40,7 +46,51 @@ class ModlistsTool(mobase.IPluginTool):
 
     def init(self, organizer):
         self.organizer = organizer
+        self.pending_downloads = {}
+        self.bridge = NexusBridge()
+        self.bridge.request.connect(self.start_nexus_download)
+        manager = organizer.downloadManager()
+        manager.onDownloadComplete(self.nexus_complete)
+        manager.onDownloadFailed(self.nexus_failed)
         return True
+
+    def start_nexus_download(self, pending):
+        try:
+            source = pending["source"]
+            download_id = self.organizer.downloadManager().startDownloadNexusFileForGame(
+                source["game"], source["modId"], source["fileId"])
+            if download_id < 0:
+                raise PackError("MO2 could not start this Nexus download. Check its Nexus connection or supply the archive in Downloads.")
+            self.pending_downloads[download_id] = pending
+        except Exception as exc:
+            pending["error"] = str(exc)
+            pending["event"].set()
+
+    def nexus_complete(self, download_id):
+        pending = self.pending_downloads.pop(download_id, None)
+        if pending is not None:
+            try:
+                pending["path"] = self.organizer.downloadManager().downloadPath(download_id)
+            except Exception as exc:
+                pending["error"] = str(exc)
+            finally:
+                pending["event"].set()
+
+    def nexus_failed(self, download_id):
+        pending = self.pending_downloads.pop(download_id, None)
+        if pending is not None:
+            pending["error"] = "Nexus download failed. Check MO2 Downloads or supply the exact archive manually."
+            pending["event"].set()
+
+    def fetch_nexus(self, source):
+        pending = {"source": source, "event": threading.Event()}
+        self.bridge.request.emit(pending)
+        while not pending["event"].wait(0.25):
+            if QThread.currentThread().isInterruptionRequested():
+                raise PackError("Import cancelled; any in-progress Nexus download remains in MO2 Downloads")
+        if "error" in pending:
+            raise PackError(pending["error"])
+        return pending["path"]
 
     def name(self):
         return "MO2 Modlists"
@@ -55,10 +105,15 @@ class ModlistsTool(mobase.IPluginTool):
         return "Export and import verified, private profile bundles."
 
     def version(self):
-        return mobase.VersionInfo(0, 1, 0)
+        return mobase.VersionInfo(0, 2, 0)
 
     def settings(self):
-        return []
+        return [mobase.PluginSetting("archive-directories", "Additional download directories, separated by semicolons", ""),
+                mobase.PluginSetting("github-source-catalog", "Optional JSON catalog of known GitHub release URLs and archive hashes", "")]
+
+    def archive_directories(self, root):
+        extra = str(self.organizer.pluginSetting(self.name(), "archive-directories") or "")
+        return [root / "downloads"] + [Path(p.strip()) for p in extra.split(";") if p.strip()]
 
     def displayName(self):
         return "Modlists / Export or import profile"
@@ -94,7 +149,7 @@ class ModlistsTool(mobase.IPluginTool):
         layout = QVBoxLayout(dialog)
         label = QLabel(f"Current profile: {profile}\n\nExport installed mod choices and ordering, then import into a new profile.\n"
                        "Bundles contain local mod files and are for personal backup/transfer.\n"
-                       "This preview reads locked bundles; remote dependency resolution is pending.")
+                       "Pinned source archives can be reconstructed; new dependency resolution is pending.")
         label.setWordWrap(True)
         layout.addWidget(label)
         export = QPushButton("Export current profile…")
@@ -150,7 +205,10 @@ class ModlistsTool(mobase.IPluginTool):
             return
         self.organizer.refresh(True)
         bundle = Path(destination) / name
-        self.run_job(parent, lambda report: export_profile(root, game, profile, bundle, progress=report),
+        archives = self.archive_directories(root)
+        catalog = str(self.organizer.pluginSetting(self.name(), "github-source-catalog") or "")
+        self.run_job(parent, lambda report: export_source_profile(root, game, profile, bundle, archives,
+                                                                 Path(catalog) if catalog else None, progress=report),
                      lambda result: QMessageBox.information(parent, "Export complete",
                          f"{result['mods']} mods exported.\n\n{bundle / 'modlist.json'}"))
 
@@ -169,6 +227,7 @@ class ModlistsTool(mobase.IPluginTool):
             return
         review = QMessageBox(QMessageBox.Icon.Question, "Review import",
                             f"Create profile '{name}' with {len(lock['layers'])} mods.\n"
+                            f"Use {len(lock.get('sourceArtifacts', {}))} pinned source archives where needed.\n"
                             f"Restore {len(lock['overwrite'])} generated/settings files as the highest-priority mod.\n"
                             f"Deploy {len(lock['root'])} physical game-root files if their contents differ.\n\n"
                             "Root files and CP77 support-plugin settings affect all profiles using this game. "
@@ -187,4 +246,9 @@ class ModlistsTool(mobase.IPluginTool):
             QMessageBox.information(parent, "Import complete",
                                     f"Profile '{name}' is ready.\nRestart MO2 to refresh the profile selector, then select it and launch the game.")
 
-        self.run_job(parent, lambda report: import_profile(bundle, root, game, name, allow_root=True, progress=report, manage_ini=False), completed)
+        def restore(report):
+            hydrate_bundle(bundle, root / ".modlists/source-cache", archive_dirs,
+                           download=True, progress=report, nexus_fetcher=self.fetch_nexus)
+            return import_profile(bundle, root, game, name, allow_root=True, progress=report, manage_ini=False)
+        archive_dirs = self.archive_directories(root)
+        self.run_job(parent, restore, completed)

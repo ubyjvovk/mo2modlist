@@ -1,9 +1,11 @@
 from pathlib import Path
 import hashlib
 import zipfile
+import tomllib
 
 root = Path(__file__).resolve().parents[1]
-output = root / "artifacts/MO2-Modlists-0.1.0.zip"
+version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+output = root / f"artifacts/MO2-Modlists-{version}.zip"
 output.parent.mkdir(exist_ok=True)
 with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
     for source, prefix in ((root / "plugin/mo2_modlists_plugin", "plugins/mo2_modlists_plugin"),

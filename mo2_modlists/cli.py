@@ -18,16 +18,36 @@ def main():
         p.add_argument("--user-settings", type=Path)
         if command == "import":
             p.add_argument("--allow-root", action="store_true")
+            p.add_argument("--archives", nargs="*", default=[], type=Path)
+            p.add_argument("--download-sources", action="store_true")
     p = sub.add_parser("verify")
     p.add_argument("bundle", type=Path)
+    p = sub.add_parser("compact")
+    p.add_argument("--bundle", required=True, type=Path)
+    p.add_argument("--output", required=True, type=Path)
+    p.add_argument("--archives", nargs="+", required=True, type=Path)
+    p.add_argument("--github-manifest", type=Path)
+    p = sub.add_parser("hydrate")
+    p.add_argument("--bundle", required=True, type=Path)
+    p.add_argument("--cache", required=True, type=Path)
+    p.add_argument("--archives", nargs="*", default=[], type=Path)
+    p.add_argument("--download", action="store_true")
     args = parser.parse_args()
     progress = lambda message: print(message, file=sys.stderr, flush=True)
     try:
         if args.command == "export":
             result = export_profile(args.mo2, args.game, args.profile, args.bundle, args.user_settings, progress)
         elif args.command == "import":
+            from .sources import hydrate_bundle
+            hydrate_bundle(args.bundle, args.mo2 / ".modlists/source-cache", args.archives, args.download_sources, progress)
             result = import_profile(args.bundle, args.mo2, args.game, args.profile,
                                     args.allow_root, args.user_settings, progress)
+        elif args.command == "compact":
+            from .sources import compact_bundle
+            result = compact_bundle(args.bundle, args.output, args.archives, args.github_manifest, progress)
+        elif args.command == "hydrate":
+            from .sources import hydrate_bundle
+            result = hydrate_bundle(args.bundle, args.cache, args.archives, args.download, progress)
         else:
             lock = verify_bundle(args.bundle)
             result = {"verified": True, "mods": len(lock["layers"])}
