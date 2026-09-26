@@ -30,7 +30,7 @@ Review the resulting components and physical game-folder writes, then install. T
 
 Retry the same manifest/lock and profile name after an interrupted operation. Verified cached archives and staging are reused. A completed profile is never overwritten. Restart MO2 to refresh its profile selector and select the new profile manually.
 
-**Import Nexus Collection…** accepts a full downloaded package or Collection URL. Optional entries and supported ordering/dependency rules are retained. Unhandled installer instructions/patches produce a review draft, not a completed pack. URL downloads currently require a supported Nexus authentication flow when the service requests one; the downloaded-package route is available. MO2's supported download manager handles individual Nexus mod archives.
+**Import Nexus Collection…** accepts a full downloaded package, saved review draft or Collection URL. Optional entries and supported ordering/dependency rules are retained; embedded archives are extracted and verified. Unhandled installer choices/patches can be supplied as a prepared archive plus recipe with an explicit handoff record. Other unresolved instructions produce a review draft, not a completed pack. Collection-level external steps require acknowledgement for each installation target. URL downloads use the optional stored Nexus API key when required; the downloaded-package route is also available. MO2's supported download manager handles individual Nexus mod archives.
 
 ## CLI
 

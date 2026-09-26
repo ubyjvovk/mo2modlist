@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from pathlib import Path
 import re
+import shutil
 import urllib.parse
 
 from .acquisition import InputRequired, json_request, download
-from .core import PackError, digest, json_digest, safe_relative, write_json
+from .core import PackError, digest, json_digest, safe_join, safe_relative, write_json
 from .manifest import local_dependency, source_from_url, validate_manifest
 from .sources import members, stream_member
 
@@ -136,6 +138,77 @@ def match_reference(reference, mods):
     return result[0] if len(result) == 1 else None
 
 
+def bundled_dependency(package, mod, cache, progress=lambda text: None):
+    """Extract an exact embedded source archive; never execute bundled content."""
+    expression = mod.get("source", {}).get("fileExpression")
+    if not isinstance(expression, str):
+        raise InputRequired("collection-bundle", "Bundled mod has no exact archive filename")
+    relative = safe_relative(expression.replace("\\", "/"))
+    index = list(members(package))
+    documents = [name for name, _ in index if name.casefold().split("/")[-1] == "collection.json"]
+    if len(documents) != 1:
+        raise PackError("Expected one collection.json to locate bundled sources")
+    prefix = documents[0].rsplit("/", 1)[0] + "/" if "/" in documents[0] else ""
+    wanted = (prefix + "bundled/" + relative).casefold()
+    matches = [(name, size) for name, size in index if name.casefold() == wanted]
+    if len(matches) != 1:
+        raise InputRequired("collection-bundle", "Exact bundled archive is absent", member=wanted)
+    member, size = matches[0]
+    suffix = Path(member).suffix.lower()
+    if suffix not in (".zip", ".7z"):
+        raise InputRequired("collection-bundle", "Bundled source is not a supported ZIP/7z archive", member=member)
+    package_sha = digest(package)
+    destination = safe_join(cache, "collection-bundles/" + json_digest({"package": package_sha, "member": member}) + suffix)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    expected = stream_member(package, member, progress=progress)
+    if destination.exists():
+        if destination.stat().st_size != size or digest(destination) != expected:
+            raise PackError("Cached bundled archive was modified")
+    else:
+        if shutil.disk_usage(destination.parent).free < size:
+            raise PackError("Not enough space for bundled source archive")
+        temporary = destination.with_name(destination.name + ".partial")
+        with temporary.open("wb") as output:
+            actual = stream_member(package, member, output, progress=progress)
+        if actual != expected or temporary.stat().st_size != size:
+            raise PackError("Bundled archive changed during extraction")
+        os.replace(temporary, destination)
+    return {"source": {"type": "local-archive", "path": destination.resolve().as_posix()},
+        "integrity": "sha256:" + expected,
+        "extensions": {"nexusBundledArtifact": {"collectionArchiveSha256": package_sha, "member": member}}}
+
+
+def installer_fields(mod):
+    fields = [key for key in ("choices", "patches", "instructions", "hashes") if mod.get(key)]
+    if mod.get("details", {}).get("type"):
+        fields.append("details")
+    if mod.get("source", {}).get("instructions"):
+        fields.append("source")
+    return fields
+
+
+def entry_source(mod, decision, game):
+    if decision.get("source") is not None:
+        return decision["source"]
+    raw = mod.get("source", {})
+    if raw.get("type") == "nexus" and raw.get("modId") and raw.get("fileId"):
+        return {"type": "nexus", "game": mod.get("domainName", game), "modId": int(raw["modId"]), "fileId": int(raw["fileId"])}
+    if raw.get("type") in ("direct", "browse") and raw.get("url"):
+        try:
+            return source_from_url(raw["url"])
+        except PackError:
+            pass
+    return None
+
+
+def handoff_complete(decision, source, required_fields, collection_sha):
+    handoff = decision.get("handoff", {})
+    return bool(source and source.get("type") == "local-archive" and "recipe" in decision and "integrity" in decision
+        and handoff.get("collectionSha256") == collection_sha and handoff.get("method") == "prepared-archive"
+        and set(handoff.get("handled", [])) == set(required_fields)
+        and isinstance(handoff.get("note"), str) and handoff["note"].strip())
+
+
 def convert_collection(document, *, identity=None, decisions=None):
     """Return a review draft. Nonempty pending means no installable manifest yet.
 
@@ -144,19 +217,24 @@ may be replaced and optional mods included/excluded. Installer data is never
 silently discarded; its explicit recipe handoff is part of later resolution.
 """
     decisions = decisions or {}
+    collection_sha = json_digest(document)
     info = document["info"]
     game = info.get("domainName")
     if game != "cyberpunk2077":
         raise PackError("Collection game is not Cyberpunk 2077")
     pending, notes, dependencies, retained = [], [], {}, {}
-    normalized_rules, path_winners = [], []
+    normalized_rules, path_winners, handoffs = [], [], {}
     all_mods = {f"mod-{index:04d}": mod for index, mod in enumerate(document["mods"], 1)}
     manifest = {"schemaVersion": 1, "name": info["name"], "game": {"id": game, "dlc": []}, "dependencies": dependencies}
     versions = info.get("gameVersions") or []
     if len(versions) == 1:
         manifest["game"]["version"] = versions[0]
     elif len(versions) > 1:
-        pending.append({"kind": "game-version", "choices": versions})
+        selected_version = decisions.get("_collection", {}).get("gameVersion")
+        if selected_version in versions:
+            manifest["game"]["version"] = selected_version
+        else:
+            pending.append({"kind": "game-version", "choices": versions})
     for index, mod in enumerate(document["mods"], 1):
         alias = f"mod-{index:04d}"
         decision = decisions.get(alias, {})
@@ -172,31 +250,28 @@ silently discarded; its explicit recipe handoff is part of later resolution.
             continue
         retained[alias] = mod
         raw = mod.get("source", {})
-        source = decision.get("source")
-        if source is None:
-            if raw.get("type") == "nexus" and raw.get("modId") and raw.get("fileId"):
-                source = {"type": "nexus", "game": mod.get("domainName", game), "modId": int(raw["modId"]), "fileId": int(raw["fileId"])}
-                if raw.get("updatePolicy", "exact") != "exact":
-                    notes.append(f"{alias}: using collection's exact recorded file; updates require an explicit re-resolve")
-            elif raw.get("type") in ("direct", "browse") and raw.get("url"):
-                try:
-                    source = source_from_url(raw["url"])
-                except PackError:
-                    pass
+        source = entry_source(mod, decision, game)
+        if raw.get("type") == "nexus" and raw.get("updatePolicy", "exact") != "exact":
+            notes.append(f"{alias}: using collection's exact recorded file; updates require an explicit re-resolve")
         if source is None:
             pending.append({"kind": "source", "alias": alias, "name": mod.get("name", alias), "sourceType": raw.get("type"), "message": "Provide a supported source or a local archive"})
             continue
         dep = {"source": source}
-        for field in ("integrity", "recipe", "options"):
+        for field in ("integrity", "recipe", "options", "extensions"):
             if field in decision:
                 dep[field] = decision[field]
         dependencies[alias] = dep
         for path in mod.get("fileOverrides", []):
             path_winners.append({"winner": alias, "path": safe_relative(path.replace("\\", "/"))})
-        unsupported = [key for key in ("choices", "patches", "instructions") if mod.get(key)]
+        unsupported = installer_fields(mod)
         if unsupported:
-            pending.append({"kind": "installer-data", "alias": alias, "fields": unsupported,
-                            "message": "Collection installer/patch instructions need a recorded installation recipe"})
+            handoff = decision.get("handoff", {})
+            if handoff_complete(decision, source, unsupported, collection_sha):
+                handoffs[alias] = {**handoff, "originalEntrySha256": json_digest(mod)}
+                notes.append(f"{alias}: installer output supplied through an explicit prepared-archive handoff")
+            else:
+                pending.append({"kind": "installer-data", "alias": alias, "fields": unsupported,
+                                "message": "Supply an archive/recipe containing the chosen installer and patch outputs, with an explicit manual-handoff record"})
         if mod.get("domainName", game) != game:
             pending.append({"kind": "foreign-game", "alias": alias})
     for rule in document.get("modRules", []):
@@ -222,13 +297,12 @@ silently discarded; its explicit recipe handoff is part of later resolution.
     for key in sorted(document.keys() - known):
         if document[key]:
             pending.append({"kind": "collection-extension", "field": key})
-    if info.get("installInstructions"):
-        pending.append({"kind": "collection-instructions", "message": "Review collection-level installation instructions"})
     manifest["extensions"] = {"nexusCollection": {"schemaVersion": 1, "identity": identity or {},
-        "metadataSha256": json_digest(document), "rules": normalized_rules, "pathWinners": path_winners}}
+        "metadataSha256": collection_sha, "rules": normalized_rules, "pathWinners": path_winners,
+        "manualHandoffs": handoffs, "externalInstructions": info.get("installInstructions") or ""}}
     validate_manifest(manifest)
     return {"manifest": manifest, "pending": pending, "notes": notes,
-            "collectionSha256": json_digest(document), "retainedInstructions": document,
+            "collectionSha256": collection_sha, "retainedInstructions": document, "decisions": decisions,
             "complete": not pending}
 
 

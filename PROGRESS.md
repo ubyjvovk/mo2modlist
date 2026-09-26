@@ -2,6 +2,14 @@
 
 ## Current implementation: 0.4.0 source importer (goal remains active)
 
+Collection handoff follow-up to `1adf413`:
+
+- Implemented exact embedded ZIP/7z archive extraction, content/provenance hashes, explicit local/provider source replacement, prepared-archive+recipe handoffs for installer choices/patches/custom types, and reopening saved review drafts. Manual handoffs bind to the exact Collection metadata and preserve the user's note; they do not claim automatic installer or binary patch replay.
+- Collection-level instructions now become locked external prerequisites and require fresh acknowledgement per target, recorded in the journal. CLI `--acknowledge` supplies an explicit completed-prerequisite ID. Unacknowledged installs fail before changing the target.
+- Real MO2 `source-ui-probe-collection1` passed: import a full Collection package with an embedded source, omit an optional entry, select a missing recipe on the UI thread, acknowledge instructions, review/deploy a new profile, then create a second profile from cache/lock with a fresh acknowledgement. The installed bytes matched and the previously selected profile remained unchanged.
+- Strengthened restart-validator ordering, GitHub download cache identity (new asset IDs cannot reuse old temporary downloads), existing staging/profile reparse-path checks, and 7z link/directory validation. Added tests for changed GitHub IDs and restarted downloads.
+- 47 tests pass at this checkpoint. Source and Collection host probes remain fixture evidence; a representative live authenticated Collection and the new mixed-source game smoke check are still outstanding. Automatic compatible-candidate backtracking and broader ownership/lock validation remain on the acceptance tracker.
+
 Follow-up to commit `4990eae`:
 
 - Added optional Nexus/GitHub credential controls backed by Windows Credential Manager. An isolated random test credential was written/read/deleted successfully; no real account key was requested or copied from MO2. Individual Nexus mod downloads continue through MO2's service. The optional Nexus key is used for Collection and metadata requests; GitHub token headers are used for release metadata.

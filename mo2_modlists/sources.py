@@ -68,11 +68,13 @@ def members(path: Path):
     seen = set()
     for block in result.stdout.replace("\r\n", "\n").split("\n\n"):
         info = dict(line.split(" = ", 1) for line in block.splitlines() if " = " in line)
-        if "Path" not in info or info.get("Folder") == "+" or info.get("Attributes", "").startswith("D"):
+        if "Path" not in info:
             continue
         if "Symbolic Link" in info or "Hard Link" in info:
             raise PackError("Archive links are unsupported")
         name = safe_relative(info["Path"].replace("\\", "/"))
+        if info.get("Folder") == "+" or info.get("Attributes", "").startswith("D"):
+            continue
         if name.casefold() in seen:
             raise PackError(f"Duplicate archive member: {name}")
         seen.add(name.casefold())

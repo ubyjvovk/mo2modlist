@@ -380,9 +380,14 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
     for rule in collection.get("rules", []):
         if rule["type"] == "requires":
             edges.append({"from": aliases[rule["source"]], "to": aliases[rule["target"]], "alias": rule["target"], "provenance": "nexus-collection"})
+    prerequisites = []
+    if collection.get("externalInstructions"):
+        instruction = collection["externalInstructions"]
+        prerequisites.append({"id": json_digest(instruction), "kind": "manual-collection-instructions", "text": instruction,
+            "notice": "Complete these external steps for this target installation; they are not performed by the importer."})
     lock = {"schemaVersion": 1, "kind": "source-installation", "manifestSha256": json_digest(document),
             "game": identity, "packages": packages, "aliases": aliases, "dependencyEdges": edges,
-            "priority": priority, "fileChoices": choices, "adapterVersion": "cp77-1", "externalPrerequisites": [], "registries": registry_snapshots,
+            "priority": priority, "fileChoices": choices, "adapterVersion": "cp77-1", "externalPrerequisites": prerequisites, "registries": registry_snapshots,
             "collection": collection}
     if lock_path.exists():
         raise PackError("Lock destination exists; choose a new lockfile for explicit re-resolution")

@@ -33,6 +33,7 @@ def main():
             action.add_argument("--mo2", required=True, type=Path)
             action.add_argument("--profile", required=True)
             action.add_argument("--allow-root", action="store_true")
+            action.add_argument("--acknowledge", action="append", default=[], help="ID of an external prerequisite completed for this target")
     collection = sub.add_parser("import-collection", help="Convert a Nexus Collection package or URL; unresolved choices block finalization")
     origin = collection.add_mutually_exclusive_group(required=True)
     origin.add_argument("--file", type=Path)
@@ -53,14 +54,22 @@ def main():
             document = validate_manifest(json.loads(args.manifest.read_text(encoding="utf-8-sig")))
             result = {"valid": True, "dependencies": len(document["dependencies"])}
         elif args.command == "import-collection":
-            from .collections import fetch_collection, read_collection, convert_collection, write_collection_manifest
+            from .collections import fetch_collection, read_collection, convert_collection, write_collection_manifest, bundled_dependency
             path, identity = args.file, None
             if args.url:
                 if args.cache is None:
                     raise PackError("--cache is required for collection URL downloads")
-                path, identity = fetch_collection(args.url, args.cache, progress=progress)
+                from .credentials import headers
+                path, identity = fetch_collection(args.url, args.cache, progress=progress, headers=headers("nexus"))
             decisions = json.loads(args.decisions.read_text(encoding="utf-8-sig")) if args.decisions else {}
-            draft = convert_collection(read_collection(path), identity=identity, decisions=decisions)
+            document = read_collection(path)
+            if args.cache and path.suffix.lower() != ".json":
+                for index, mod in enumerate(document["mods"], 1):
+                    decision = decisions.setdefault(f"mod-{index:04d}", {})
+                    if (mod.get("source", {}).get("type") == "bundle" and "source" not in decision
+                        and (not mod.get("optional") or decision.get("include") is True)):
+                        decision.update(bundled_dependency(path, mod, args.cache, progress))
+            draft = convert_collection(document, identity=identity, decisions=decisions)
             write_collection_manifest(draft, args.output)
             result = {"manifest": str(args.output), "dependencies": len(draft["manifest"]["dependencies"]), "notes": draft["notes"]}
         else:
@@ -79,7 +88,7 @@ def main():
                 result = {"lock": str(args.lock), "packages": len(lock["packages"])}
             if args.command != "resolve":
                 result = import_lock(args.manifest, args.lock, store, args.mo2, args.game, args.profile,
-                                     allow_root=args.allow_root, progress=progress)
+                                     allow_root=args.allow_root, progress=progress, acknowledged=args.acknowledge)
         print(json.dumps(result, indent=2))
     except (PackError, OSError, ValueError) as exc:
         if hasattr(exc, "request"):

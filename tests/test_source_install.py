@@ -199,6 +199,23 @@ import_lock(root / "modlist.json", root / "modlist.lock.json", ArtifactStore(roo
         self.assertEqual(feature["nativeMetadata"], metadata)
         import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "Native")
 
+    def test_collection_external_steps_require_fresh_target_acknowledgement(self):
+        dep = self.dependency("mod", {"r6/scripts/a.reds": b"a"})
+        self.resolve({"mod": dep})
+        self.lock.unlink()
+        document = json.loads(self.manifest.read_text())
+        document["extensions"] = {"nexusCollection": {"schemaVersion": 1, "externalInstructions": "Complete the fixture's external setup."}}
+        self.manifest.write_text(json.dumps(document))
+        lock = resolve_manifest(self.manifest, self.store, self.game, self.lock)
+        with self.assertRaises(InputRequired) as error:
+            import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "New")
+        self.assertEqual(error.exception.request["kind"], "external-prerequisites")
+        self.assertEqual(list(self.mo2.iterdir()), [])
+        acknowledged = [lock["externalPrerequisites"][0]["id"]]
+        import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "New", acknowledged=acknowledged)
+        with self.assertRaises(InputRequired):
+            import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "Another")
+
     def test_conflicting_components_show_both_reason_chains(self):
         left = self.dependency("left", {"r6/scripts/a.reds": b"a"}, component="shared")
         right = self.dependency("right", {"r6/scripts/b.reds": b"b"}, component="shared")
@@ -253,6 +270,34 @@ import_lock(root / "modlist.json", root / "modlist.lock.json", ArtifactStore(roo
 
 
 class DownloadTests(unittest.TestCase):
+    def test_changed_github_asset_id_gets_new_bytes_and_old_lock_cannot_substitute(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = {"type": "github-release", "repository": "owner/repo", "tag": "v1", "asset": "mod.zip"}
+            release = {"id": 1, "tag_name": "v1", "assets": [{"id": 10, "name": "mod.zip", "browser_download_url": "https://example.org/old"}]}
+            def transfer(url, target, progress):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(url.encode())
+            store = ArtifactStore(root / "cache", request=lambda url: release, transfer=transfer)
+            first = store.acquire({"source": source}, root / "manifest.json")
+            release["assets"][0].update(id=11, browser_download_url="https://example.org/new")
+            second = store.acquire({"source": source}, root / "manifest.json")
+            self.assertNotEqual(first["sha256"], second["sha256"])
+            store.path(first["sha256"]).unlink()
+            with self.assertRaisesRegex(PackError, "identity changed"):
+                store.acquire({"source": source}, root / "manifest.json", locked=first)
+
+    def test_changed_remote_validator_restarts_partial_without_old_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "archive.bin"
+            target.with_suffix(".partial").write_bytes(b"old bytes")
+            target.with_suffix(".download.json").write_text(json.dumps({"validator": '"old"'}))
+            class Response(io.BytesIO):
+                status = 200
+                headers = {"ETag": '"new"', "Content-Length": "3"}
+            download("https://example.org/archive", target, opener=lambda *a, **k: Response(b"new"))
+            self.assertEqual(target.read_bytes(), b"new")
+
     def test_resume_requires_matching_validator_and_offset(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "archive.bin"

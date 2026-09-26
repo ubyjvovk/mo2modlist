@@ -78,6 +78,42 @@ class CollectionTests(unittest.TestCase):
         self.assertIn("$revision: Int!", calls[0]["query"])
         self.assertEqual(error.exception.request["providerCodes"], ["ADULT_CONTENT_BLOCKED"])
 
+    def test_prepared_archive_handoff_must_bind_to_exact_collection_instructions(self):
+        from mo2_modlists.core import json_digest
+        collection = self.fixture()
+        collection["mods"][0].update(choices={"option": "A"}, patches={"r6/config.ini": "AABBCCDD"})
+        decision = {"source": {"type": "local-archive", "path": "prepared.zip"}, "recipe": "prepared.recipe.json",
+            "integrity": "sha256:" + "a" * 64,
+            "handoff": {"method": "prepared-archive", "collectionSha256": json_digest(collection),
+                "handled": ["choices", "patches"], "note": "Applied option A and author patches, then archived the installed output."}}
+        draft = convert_collection(collection, decisions={"mod-0001": decision})
+        self.assertTrue(draft["complete"])
+        self.assertEqual(draft["manifest"]["extensions"]["nexusCollection"]["manualHandoffs"]["mod-0001"]["method"], "prepared-archive")
+        collection["mods"][0]["choices"]["option"] = "B"
+        self.assertFalse(convert_collection(collection, decisions={"mod-0001": decision})["complete"])
+
+    def test_bundled_source_is_extracted_hashed_and_used_without_losing_provenance(self):
+        import io
+        from mo2_modlists.collections import bundled_dependency
+        from mo2_modlists.core import digest
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inner = io.BytesIO()
+            with zipfile.ZipFile(inner, "w") as archive:
+                archive.writestr("r6/test.ini", "config")
+            collection = self.fixture()
+            collection["mods"][0]["source"] = {"type": "bundle", "fileExpression": "bundle.zip"}
+            package = root / "collection.zip"
+            with zipfile.ZipFile(package, "w") as archive:
+                archive.writestr("collection.json", json.dumps(collection))
+                archive.writestr("bundled/bundle.zip", inner.getvalue())
+            dependency = bundled_dependency(package, collection["mods"][0], root / "cache")
+            archive = Path(dependency["source"]["path"])
+            self.assertEqual(dependency["integrity"], "sha256:" + digest(archive))
+            draft = convert_collection(collection, decisions={"mod-0001": dependency})
+            self.assertTrue(draft["complete"])
+            self.assertEqual(draft["manifest"]["dependencies"]["mod-0001"]["extensions"]["nexusBundledArtifact"]["member"], "bundled/bundle.zip")
+
 
 if __name__ == "__main__":
     unittest.main()

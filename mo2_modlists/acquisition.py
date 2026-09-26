@@ -73,10 +73,16 @@ def download(url, target: Path, progress=lambda text: None, opener=urllib.reques
             offset = 0
         else:
             raise PackError(f"Unexpected download response {status}")
+        if not offset:
+            # Truncate old bytes before publishing a new validator. A process
+            # crash between these writes must never relabel an old partial.
+            with part.open("wb") as output:
+                output.flush()
+                os.fsync(output.fileno())
         write_json(state_file, {"validator": new_validator})
         length = response.headers.get("Content-Length")
         received = 0
-        with part.open("ab" if offset else "wb") as output:
+        with part.open("ab") as output:
             while chunk := response.read(1024 * 1024):
                 progress(f"Downloading archive: {(offset + received) // 1048576} MiB")
                 output.write(chunk)
@@ -196,7 +202,7 @@ class ArtifactStore:
             if locked and any(locked.get(k) != v for k, v in identities.items()):
                 raise PackError("Locked GitHub release or asset identity changed")
             pinned = {"type": "github-release", "repository": repository, "tag": release["tag_name"], "asset": asset["name"]}
-            target = self.root / "downloads" / (json_digest(pinned) + ".archive")
+            target = self.root / "downloads" / (json_digest({"source": pinned, **identities}) + ".archive")
             if not target.is_file() or (expected and digest(target) != expected):
                 self.transfer(asset["browser_download_url"], target, self.progress)
             result = self.store(target, pinned, expected, **identities)

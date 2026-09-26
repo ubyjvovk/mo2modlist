@@ -74,4 +74,10 @@ The converter pins recorded Nexus file IDs, supports recognized GitHub asset URL
 
 Normalized collection metadata lives in `extensions.nexusCollection`; it includes a schema version, revision identity when available, original document digest, rules and path winners. During resolution, the complete output inventory turns ordering rules into effective MO2 priority. Contradictory ordering/file winners block installation.
 
-Patches, FOMOD choices, bundled artifacts, unsupported source sites, collection-specific extensions and installation instructions still require a recorded handoff. The UI saves the complete original data and outstanding requests in a `.collection-review.json`; it does not label that draft installable. General Vortex installer replay is out of scope. Full real-world collection support remains an acceptance item.
+Exact ZIP/7z files under the package's `bundled/` directory are extracted into a verified cache and referenced locally, with their originating collection/member digests retained. Unsupported source sites can be replaced with an explicit local archive or supported provider URL.
+
+Patches, FOMOD choices, custom installer types, output hashes and mod-specific instructions require a prepared-archive handoff: choose an archive containing the completed output, an artifact-bound recipe, and a note describing the work. The handoff records the exact Collection digest and handled fields; changing the Collection invalidates the acknowledgement. It does not claim automatic Vortex installer or binary-patch replay.
+
+Collection-level instructions are retained as external prerequisites in the lock. The importer displays them and requires acknowledgement for each target installation; acknowledgements live in the installation journal, not a reusable claim that another machine is configured. CLI installs supply `--acknowledge <prerequisite-id>` after completing the indicated steps.
+
+Outstanding data is saved with the full original Collection in `.collection-review.json`. Reopen it to continue decisions. Ambiguous rule references and unsupported Collection extensions still block conversion. Full real-world Collection acceptance remains pending.

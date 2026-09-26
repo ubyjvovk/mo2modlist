@@ -53,6 +53,13 @@ def validate_lock(lock, manifest):
         raise PackError("Manifest differs from lock; explicitly re-resolve before installing")
     if lock.get("adapterVersion") != "cp77-1":
         raise PackError("Unsupported game adapter in lock")
+    prerequisites = lock.get("externalPrerequisites", [])
+    if not isinstance(prerequisites, list):
+        raise PackError("Invalid external prerequisites")
+    for item in prerequisites:
+        if (item.get("kind") != "manual-collection-instructions" or not isinstance(item.get("text"), str)
+            or item.get("id") != json_digest(item["text"])):
+            raise PackError("Invalid or unsupported external prerequisite")
     packages = lock.get("packages")
     if not isinstance(packages, dict) or sorted(lock.get("priority", [])) != sorted(packages):
         raise PackError("Invalid lock package priority")
@@ -95,13 +102,18 @@ def validate_lock(lock, manifest):
 
 
 def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, allow_root=False,
-                progress=lambda text: None, failure_hook=lambda phase: None):
+                progress=lambda text: None, failure_hook=lambda phase: None, acknowledged=()):
     document = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
     lock = json.loads(lock_path.read_text(encoding="utf-8-sig"))
     validate_lock(lock, document)
+    required = {item["id"] for item in lock.get("externalPrerequisites", [])}
+    if not required.issubset(set(acknowledged)):
+        from .acquisition import InputRequired
+        raise InputRequired("external-prerequisites", "Complete and acknowledge the external instructions for this target before installing",
+                            requirements=lock["externalPrerequisites"])
     require_game_closed()
     mo2, game = mo2.resolve(), game.resolve()
-    profile = safe_join(mo2 / "profiles", profile_name)
+    profile = safe_join(mo2, "profiles/" + profile_name)
     if "/" in safe_relative(profile_name):
         raise PackError("Choose one profile name")
     identity = game_identity(game)
@@ -131,6 +143,7 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
     with installation_guard(mo2):
         operation.mkdir(parents=True, exist_ok=True)
         journal = json.loads(journal_path.read_text(encoding="utf-8")) if journal_path.exists() else {"status": "staging", "lockSha256": json_digest(lock), "root": {}, "mods": {}}
+        journal["acknowledgedPrerequisites"] = sorted(required)
         if journal["lockSha256"] != json_digest(lock):
             raise PackError("Operation journal belongs to a different plan")
         if profile.exists():
@@ -168,7 +181,7 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                 artifact = store.acquire({"source": package["artifact"]["source"]},
                     Path(package["sourceDocument"]), locked=package["artifact"])
                 archive = store.path(artifact["sha256"])
-                stage = operation / "s" / str(index)
+                stage = safe_join(mo2, ".modlists/" + operation_id + "/s/" + str(index))
                 stage.mkdir(parents=True, exist_ok=True)
                 stage_by_key[key] = stage
                 for entry in package["outputs"]:
@@ -186,7 +199,7 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                 label = re.sub(r"[^a-zA-Z0-9 _-]", "-", package["component"])[:45].strip() or "mod"
                 name = f"{label} [ML-{operation_id[:8]}-{index:03d}]"
                 names.append(name)
-                destination = safe_join(mo2 / "mods", name)
+                destination = safe_join(mo2, "mods/" + name)
                 if not destination.exists():
                     journal["mods"][key] = name
                     checkpoint()
@@ -220,7 +233,7 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                 if canonical not in journal["root"]:
                     backup = None
                     if target.exists():
-                        backup_path = operation / "b" / str(len(journal["root"]))
+                        backup_path = safe_join(mo2, ".modlists/" + operation_id + "/b/" + str(len(journal["root"])))
                         backup_path.parent.mkdir(exist_ok=True)
                         shutil.copyfile(target, backup_path)
                         backup = {"path": str(backup_path), "sha256": digest(backup_path)}
@@ -235,7 +248,7 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                 shutil.copyfile(safe_join(stage_by_key[key], entry["path"]), temporary)
                 os.replace(temporary, target)
                 failure_hook("root-written")
-            stage_profile = operation / "profile"
+            stage_profile = safe_join(mo2, ".modlists/" + operation_id + "/profile")
             stage_profile.mkdir(exist_ok=True)
             (stage_profile / "modlist.txt").write_text("# MO2 Modlists: highest priority first\n" + "".join("+" + name + "\n" for name in names), encoding="utf-8")
             (stage_profile / "settings.ini").write_text("[General]\nLocalSaves=false\nLocalSettings=false\n", encoding="utf-8")

@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import threading
 
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, pyqtSignal, Qt
 from PyQt6.QtWidgets import QFileDialog, QInputDialog, QMessageBox, QLineEdit
 
 from .mo2_modlists.acquisition import ArtifactStore, InputRequired, json_request
@@ -182,6 +182,15 @@ class ImportController(QObject):
             return resolve_manifest(path, self.store(root, archives, report), game, lock_path, progress=report, ask=ask)
 
         def review(lock):
+            acknowledged = []
+            for requirement in lock.get("externalPrerequisites", []):
+                question = QMessageBox(QMessageBox.Icon.Question, "Required Collection instructions",
+                    requirement["notice"] + "\n\n" + requirement["text"] + "\n\nHave these steps been completed for this target?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, parent)
+                question.setTextFormat(Qt.TextFormat.PlainText)
+                if question.exec() != QMessageBox.StandardButton.Yes:
+                    return
+                acknowledged.append(requirement["id"])
             root_entries = {e["path"] for p in lock["packages"].values() for e in p["outputs"] if e["class"] == "game-root"}
             text = f"Create '{name}' with {len(lock['packages'])} components from the pinned source lock.\n\n"
             if root_entries:
@@ -193,12 +202,13 @@ class ImportController(QObject):
                 "source": p["artifact"]["source"], "sha256": p["artifact"]["sha256"], "reason": p["reason"], "options": p["options"],
                 "metadata": p.get("metadataProvenance"), "recipeSha256": p["recipe"]["sha256"]}
                 for p in lock["packages"].values()], "physicalGameFiles": sorted(root_entries),
-                "externalPrerequisites": lock["externalPrerequisites"], "lock": str(lock_path)}, indent=2))
+                "externalPrerequisites": lock["externalPrerequisites"], "collectionHandoffs": lock.get("collection", {}).get("manualHandoffs", {}),
+                "lock": str(lock_path)}, indent=2))
             if message.exec() != QMessageBox.StandardButton.Ok:
                 return
             def install(report):
                 return import_lock(path, lock_path, self.store(root, archives, report), root, game, name,
-                    allow_root=bool(root_entries), progress=report)
+                    allow_root=bool(root_entries), progress=report, acknowledged=acknowledged)
             def completed(result):
                 self.tool.organizer.refresh(False)
                 QMessageBox.information(parent, "Source installation complete",
@@ -207,7 +217,8 @@ class ImportController(QObject):
         self.tool.run_job(parent, plan, review)
 
     def open_collection(self, parent, root, game):
-        from .mo2_modlists.collections import read_collection, fetch_collection, convert_collection, write_collection_manifest
+        from .mo2_modlists.collections import (read_collection, fetch_collection, convert_collection, write_collection_manifest,
+                                             bundled_dependency, installer_fields, entry_source, handoff_complete)
         choice, accepted = QInputDialog.getItem(parent, "Import Nexus Collection", "Collection source:",
             ["Downloaded collection package", "Nexus Collection URL"], 0, False)
         if not accepted:
@@ -230,18 +241,98 @@ class ImportController(QObject):
                 path, identity = fetch_collection(source, root / ".modlists/source-cache", progress=report, headers=headers("nexus"))
             else:
                 path, identity = Path(source), None
-            return read_collection(path), identity
+                if path.suffix.lower() == ".json":
+                    possible = json.loads(path.read_text(encoding="utf-8-sig"))
+                    if "retainedInstructions" in possible:
+                        if json_digest(possible["retainedInstructions"]) != possible.get("collectionSha256"):
+                            raise PackError("Saved Collection review metadata changed")
+                        identity = possible.get("manifest", {}).get("extensions", {}).get("nexusCollection", {}).get("identity")
+                        return possible["retainedInstructions"], identity, possible.get("decisions", {}), None
+            return read_collection(path), identity, {}, path if path.suffix.lower() != ".json" else None
         def review(loaded):
-            document, identity = loaded
-            decisions = {}
+            from .mo2_modlists.manifest import local_dependency, source_from_url
+            document, identity, decisions, package_path = loaded
+            collection_sha = json_digest(document)
+            versions = document["info"].get("gameVersions") or []
+            if len(versions) > 1 and "gameVersion" not in decisions.get("_collection", {}):
+                version, accepted = QInputDialog.getItem(parent, "Collection game version", "Target game version:", versions, 0, False)
+                if not accepted:
+                    return
+                decisions.setdefault("_collection", {})["gameVersion"] = version
             for index, mod in enumerate(document["mods"], 1):
-                if mod.get("optional"):
+                alias = f"mod-{index:04d}"
+                decision = decisions.setdefault(alias, {})
+                if mod.get("optional") and "include" not in decision:
                     answer = QMessageBox.question(parent, "Optional collection mod", "Include " + mod.get("name", str(index)) + "?",
                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel)
                     if answer == QMessageBox.StandardButton.Cancel:
                         return
-                    decisions[f"mod-{index:04d}"] = {"include": answer == QMessageBox.StandardButton.Yes}
-            draft = convert_collection(document, identity=identity, decisions=decisions)
+                    decision["include"] = answer == QMessageBox.StandardButton.Yes
+                if decision.get("include") is False:
+                    continue
+                known_source = entry_source(mod, decision, document["info"]["domainName"])
+                unsupported = installer_fields(mod)
+                if unsupported and not handoff_complete(decision, known_source, unsupported, collection_sha):
+                    message = QMessageBox(parent)
+                    message.setWindowTitle("Installer handoff — " + mod.get("name", alias))
+                    message.setText("This entry has installer choices, patches or instructions that need an explicit handoff.\n"
+                        "Supply a prepared ZIP/7z containing the completed output and a recipe describing that archive, or retain this entry as unresolved.")
+                    message.setDetailedText(json.dumps({key: mod[key] for key in unsupported}, indent=2))
+                    prepare = message.addButton("Use prepared archive…", QMessageBox.ButtonRole.ActionRole)
+                    unresolved = message.addButton("Keep unresolved", QMessageBox.ButtonRole.ActionRole)
+                    message.addButton(QMessageBox.StandardButton.Cancel)
+                    message.exec()
+                    if message.clickedButton() == unresolved:
+                        continue
+                    if message.clickedButton() != prepare:
+                        return
+                    archive, _ = QFileDialog.getOpenFileName(parent, "Prepared installer output", "", "Archives (*.zip *.7z)")
+                    if not archive:
+                        return
+                    recipe, _ = QFileDialog.getOpenFileName(parent, "Recipe for prepared archive", "", "Recipe (*.json)")
+                    if not recipe:
+                        return
+                    note, accepted = QInputDialog.getText(parent, "Record completed handoff",
+                        "Describe how you applied all listed installer choices, patches and instructions to this archive:")
+                    if not accepted or not note.strip():
+                        return
+                    decision.update(localSelection=archive, recipe=Path(recipe).resolve().as_posix(), handoff={
+                        "method": "prepared-archive", "collectionSha256": collection_sha, "handled": unsupported, "note": note})
+                elif known_source is None:
+                    if mod.get("source", {}).get("type") == "bundle" and package_path:
+                        continue  # Extract the exact embedded archive in the worker.
+                    source_kind, accepted = QInputDialog.getItem(parent, "Source for " + mod.get("name", alias),
+                        "Provide a supported source for this Collection entry:", ["Local archive", "Nexus/GitHub URL", "Keep unresolved"], 0, False)
+                    if not accepted:
+                        return
+                    if source_kind == "Local archive":
+                        archive, _ = QFileDialog.getOpenFileName(parent, "Source archive", "", "Archives (*.zip *.7z)")
+                        if not archive:
+                            return
+                        decision["localSelection"] = archive
+                    elif source_kind == "Nexus/GitHub URL":
+                        url, accepted = QInputDialog.getText(parent, "Source URL", "Nexus file page or exact GitHub release asset URL:")
+                        if not accepted:
+                            return
+                        try:
+                            decision["source"] = source_from_url(url)
+                        except PackError as exc:
+                            QMessageBox.warning(parent, "Source URL", str(exc))
+                            return
+            def convert(report):
+                for index, mod in enumerate(document["mods"], 1):
+                    alias = f"mod-{index:04d}"
+                    decision = decisions[alias]
+                    if (package_path and mod.get("source", {}).get("type") == "bundle"
+                        and decision.get("include") is not False and "source" not in decision and "localSelection" not in decision):
+                        decision.update(bundled_dependency(package_path, mod, root / ".modlists/source-cache", report))
+                for alias, decision in decisions.items():
+                    if "localSelection" in decision:
+                        report("Verifying Collection source " + alias)
+                        decision.update(local_dependency(Path(decision.pop("localSelection")), destination))
+                return convert_collection(document, identity=identity, decisions=decisions)
+            self.tool.run_job(parent, convert, save_draft)
+        def save_draft(draft):
             if draft["pending"]:
                 review_path = destination.with_name(destination.stem + ".collection-review.json")
                 if review_path.exists():
