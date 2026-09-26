@@ -216,6 +216,60 @@ import_lock(root / "modlist.json", root / "modlist.lock.json", ArtifactStore(roo
         with self.assertRaises(InputRequired):
             import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "Another")
 
+    def test_lock_cannot_omit_a_required_dependency_or_redirect_its_edge(self):
+        from copy import deepcopy
+        base = self.dependency("base", {"r6/scripts/base.reds": b"base"})
+        feature = self.dependency("feature", {"r6/scripts/feature.reds": b"feature"}, {"base": base})
+        lock = self.resolve({"feature": feature, "base": base})
+        for mode in ("omitted", "redirected"):
+            changed = deepcopy(lock)
+            if mode == "omitted":
+                changed["dependencyEdges"] = []
+            else:
+                changed["dependencyEdges"][0]["to"] = changed["aliases"]["feature"]
+            self.lock.write_text(json.dumps(changed))
+            with self.assertRaisesRegex(PackError, "omits required|does not satisfy"):
+                import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "Bad")
+            self.assertEqual(list(self.mo2.iterdir()), [])
+
+    def test_lock_cannot_add_a_root_mapping_not_present_in_recipe(self):
+        dependency = self.dependency("mod", {"r6/scripts/a.reds": b"script"})
+        lock = self.resolve({"mod": dependency})
+        package = next(iter(lock["packages"].values()))
+        package["outputs"][0].update(path="bin/x64/unexpected.dll", **{"class": "game-root"})
+        self.lock.write_text(json.dumps(lock))
+        with self.assertRaisesRegex(PackError, "output mappings differ"):
+            import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "Bad", allow_root=True)
+        self.assertFalse((self.game / "bin/x64/unexpected.dll").exists())
+        self.assertFalse((self.mo2 / "profiles/Bad").exists())
+
+    def test_lock_priority_cannot_reverse_a_recorded_file_winner(self):
+        a = self.dependency("a", {"r6/scripts/shared.reds": b"a"})
+        b = self.dependency("b", {"r6/scripts/shared.reds": b"b"})
+        lock = self.resolve({"a": a, "b": b}, [{"winner": "a", "loser": "b", "paths": ["r6/scripts/shared.reds"]}])
+        lock["priority"].reverse()
+        self.lock.write_text(json.dumps(lock))
+        with self.assertRaisesRegex(PackError, "priority contradicts"):
+            import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "Bad")
+        self.assertEqual(list(self.mo2.iterdir()), [])
+
+    def test_readonly_verifier_detects_runtime_edits_and_unexpected_files(self):
+        from mo2_modlists.inspection import verify_installation, inspect_lock
+        dependency = self.dependency("mod", {"r6/scripts/a.reds": b"script", "bin/x64/loader.dll": b"loader"})
+        self.resolve({"mod": dependency})
+        result = import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "New", allow_root=True)
+        inspection = inspect_lock(self.manifest, self.lock)
+        self.assertEqual(inspection["physicalGameFiles"], ["bin/x64/loader.dll"])
+        verified = verify_installation(self.manifest, self.lock, self.mo2, self.game, "New")
+        self.assertTrue(verified["valid"])
+        self.assertEqual(verified["filesChecked"], 2)
+        mod = self.mo2 / "mods" / result["mods"][0]
+        (mod / "r6/scripts/a.reds").write_bytes(b"runtime edit")
+        (mod / "extra.txt").write_bytes(b"extra")
+        verified = verify_installation(self.manifest, self.lock, self.mo2, self.game, "New")
+        self.assertEqual({difference["kind"] for difference in verified["differences"]}, {"changed-file", "extra-mod-file"})
+        self.assertEqual((mod / "r6/scripts/a.reds").read_bytes(), b"runtime edit")
+
     def test_conflicting_components_show_both_reason_chains(self):
         left = self.dependency("left", {"r6/scripts/a.reds": b"a"}, component="shared")
         right = self.dependency("right", {"r6/scripts/b.reds": b"b"}, component="shared")

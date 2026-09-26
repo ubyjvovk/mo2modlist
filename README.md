@@ -34,7 +34,7 @@ Retry the same manifest/lock and profile name after an interrupted operation. Ve
 
 ## CLI
 
-Python 3.12+. Commands are `export`, `validate`, `resolve`, `install`, `import` and `import-collection`:
+Python 3.12+. Commands are `export`, `validate`, `resolve`, `install`, `import`, `import-collection`, `inspect` and `verify`:
 
 ```powershell
 .\.venv\Scripts\python.exe -m mo2_modlists.cli export `
@@ -46,10 +46,14 @@ Python 3.12+. Commands are `export`, `validate`, `resolve`, `install`, `import` 
 .\.venv\Scripts\python.exe -m mo2_modlists.cli validate 'E:\Exports\modlist.json'
 .\.venv\Scripts\python.exe -m mo2_modlists.cli resolve --manifest 'E:\Exports\modlist.json' --lock 'E:\Exports\modlist.lock.json' --cache 'E:\ModCache' --game 'E:\Games\Cyberpunk 2077'
 .\.venv\Scripts\python.exe -m mo2_modlists.cli install --manifest 'E:\Exports\modlist.json' --lock 'E:\Exports\modlist.lock.json' --cache 'E:\ModCache' --game 'E:\Games\Cyberpunk 2077' --mo2 'E:\TestMO2' --profile 'Imported' --allow-root --offline
+.\.venv\Scripts\python.exe -m mo2_modlists.cli inspect --manifest 'E:\Exports\modlist.json' --lock 'E:\Exports\modlist.lock.json'
+.\.venv\Scripts\python.exe -m mo2_modlists.cli verify --manifest 'E:\Exports\modlist.json' --lock 'E:\Exports\modlist.lock.json' --game 'E:\Games\Cyberpunk 2077' --mo2 'E:\TestMO2' --profile 'Imported'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
 The optional CLI choices file maps exact MO2 mod names to dependency objects; `null` explicitly skips a mod. Unknown sources without a choice block export. Local paths inside dependency objects resolve relative to the exported manifest, not the working directory. The choices file is a CLI input, not an exported artifact. Use the MO2 dialog for interactive source selection.
+
+`inspect` reports a validated lock's components, sources, ordering, physical game files and prerequisites without installing. `verify` checks the installed profile's managed initial files, component identities and enabled ordering against that lock, returning a nonzero exit status for differences. Runtime edits and extra files inside installed mod directories are reported; neither unmanaged game-folder files nor gameplay compatibility are covered. Verification never repairs or removes files.
 
 ## Status
 

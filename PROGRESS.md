@@ -1,5 +1,19 @@
 # Progress: 2026-09-26
 
+## 0.4.1 locked-install verification
+
+The previous goal turn was progress: commits through `c66ce7c` added the source importer and Collection workflows. This continuation inspected the current worktree and tightened the still-open verification requirements without changing the objective.
+
+- Locked aliases must cover manifest roots; graph edges must be valid, unique and reachable. Duplicate component assignments, missing required recipe edges, redirected dependency sources and mismatching options/version identities are rejected.
+- Locked priority is reconstructed from the manifest's file winners, recorded choices and Collection rules. Reversing a recorded winner or dropping a required conflict choice blocks deployment.
+- Before extraction/deployment, archive inventory and recipe-selected mappings are compared with the lock's member/path/class/size records. A tampered lock cannot add a physical root mapping absent from its recipe merely by copying a valid file digest.
+- Added read-only CLI `inspect` and `verify`. Verification checks the stored profile lock, game identity, component provenance, enabled ordering, effective root outputs, overlay file bytes and extra files inside installed mod directories. It explicitly excludes unmanaged game-root files and runtime compatibility, and performs no repairs.
+- 51 tests pass. New negative cases prove omitted/redirected dependencies, unapproved root mappings and reversed file winners fail; verifier tests detect runtime edits and extra mod files without changing them.
+- Read-only verification of `source-ui-probe-collection1 Cached` against its actual lock reported valid, one managed file checked and zero differences. This is fixture verification, not the pending mixed-source gameplay acceptance.
+- Repeated the real MO2 Collection integration with the stricter validator (`source-ui-probe-collection2`): both fresh-profile installs succeeded, with explicit instructions acknowledged per target, cached second installation and the original selected profile preserved.
+
+Remaining objective is unchanged: complete compatible candidate resolution and remaining integration/ownership checks, validate live Nexus workflows and a representative Collection, and reproduce a real mixed-source playable CP77 profile. The goal remains active.
+
 ## Current implementation: 0.4.0 source importer (goal remains active)
 
 Collection handoff follow-up to `1adf413`:

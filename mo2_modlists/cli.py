@@ -21,6 +21,14 @@ def main():
     export.add_argument("--choices", type=Path, help="Mod-name to dependency mapping; null explicitly skips a mod")
     validate = sub.add_parser("validate", help="Validate an agreed-schema source manifest")
     validate.add_argument("manifest", type=Path)
+    for command in ("inspect", "verify"):
+        action = sub.add_parser(command, help="Inspect a lock or verify its managed installed files without changing them")
+        action.add_argument("--manifest", required=True, type=Path)
+        action.add_argument("--lock", required=True, type=Path)
+        if command == "verify":
+            action.add_argument("--mo2", required=True, type=Path)
+            action.add_argument("--game", required=True, type=Path)
+            action.add_argument("--profile", required=True)
     for command in ("resolve", "install", "import"):
         action = sub.add_parser(command, help="Resolve sources or deploy a verified source lock")
         action.add_argument("--manifest", required=True, type=Path)
@@ -53,6 +61,10 @@ def main():
         elif args.command == "validate":
             document = validate_manifest(json.loads(args.manifest.read_text(encoding="utf-8-sig")))
             result = {"valid": True, "dependencies": len(document["dependencies"])}
+        elif args.command in ("inspect", "verify"):
+            from .inspection import inspect_lock, verify_installation
+            result = inspect_lock(args.manifest, args.lock) if args.command == "inspect" else verify_installation(
+                args.manifest, args.lock, args.mo2, args.game, args.profile)
         elif args.command == "import-collection":
             from .collections import fetch_collection, read_collection, convert_collection, write_collection_manifest, bundled_dependency
             path, identity = args.file, None
@@ -90,6 +102,8 @@ def main():
                 result = import_lock(args.manifest, args.lock, store, args.mo2, args.game, args.profile,
                                      allow_root=args.allow_root, progress=progress, acknowledged=args.acknowledge)
         print(json.dumps(result, indent=2))
+        if args.command == "verify" and not result["valid"]:
+            return 1
     except (PackError, OSError, ValueError) as exc:
         if hasattr(exc, "request"):
             print(json.dumps({"inputRequired": exc.request}, indent=2), file=sys.stderr)

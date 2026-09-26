@@ -119,7 +119,7 @@ def automatic_mappings(index):
     return mapped
 
 
-def outputs_for(archive, mappings, progress):
+def outputs_for(archive, mappings, progress, *, hash_contents=True):
     index = list(members(archive))
     mappings = automatic_mappings(index) if mappings is None else mappings
     outputs = {}
@@ -146,8 +146,9 @@ def outputs_for(archive, mappings, progress):
             destination = safe_relative(destination)
             key = destination.casefold()
             progress(f"Inspecting {destination}")
-            sha256 = stream_member(archive, member, progress=progress)
-            entry = {"member": member, "path": destination, "class": mapping["class"], "size": size, "sha256": sha256}
+            entry = {"member": member, "path": destination, "class": mapping["class"], "size": size}
+            if hash_contents:
+                entry["sha256"] = stream_member(archive, member, progress=progress)
             if key in outputs and outputs[key] != entry:
                 raise PackError(f"Recipe maps incompatible files to {destination}")
             outputs[key] = entry

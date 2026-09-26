@@ -46,13 +46,28 @@ def installation_guard(mo2):
 
 
 def validate_lock(lock, manifest):
+    try:
+        _validate_lock(lock, manifest)
+    except (KeyError, TypeError, AttributeError, ValueError):
+        raise PackError("Malformed source lock: check required fields and value types") from None
+
+
+def _validate_lock(lock, manifest):
     validate_manifest(manifest)
+    if not isinstance(lock, dict):
+        raise PackError("Expected a source-installation lock object")
     if lock.get("schemaVersion") != 1 or lock.get("kind") != "source-installation":
         raise PackError("Expected a finalized source-installation lock")
     if lock.get("manifestSha256") != json_digest(manifest):
         raise PackError("Manifest differs from lock; explicitly re-resolve before installing")
     if lock.get("adapterVersion") != "cp77-1":
         raise PackError("Unsupported game adapter in lock")
+    game = lock.get("game")
+    if (not isinstance(game, dict) or game.get("id") != manifest["game"]["id"]
+        or not isinstance(game.get("executableSha256"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", game["executableSha256"])
+        or not isinstance(game.get("distribution"), str) or type(game.get("phantomLiberty")) is not bool):
+        raise PackError("Invalid locked game identity")
     prerequisites = lock.get("externalPrerequisites", [])
     if not isinstance(prerequisites, list):
         raise PackError("Invalid external prerequisites")
@@ -61,15 +76,59 @@ def validate_lock(lock, manifest):
             or item.get("id") != json_digest(item["text"])):
             raise PackError("Invalid or unsupported external prerequisite")
     packages = lock.get("packages")
-    if not isinstance(packages, dict) or sorted(lock.get("priority", [])) != sorted(packages):
+    if (not isinstance(packages, dict) or not isinstance(lock.get("priority"), list)
+        or any(not isinstance(key, str) for key in lock["priority"]) or sorted(lock["priority"]) != sorted(packages)):
         raise PackError("Invalid lock package priority")
     seen_priority = set(lock["priority"])
     if len(seen_priority) != len(lock["priority"]):
         raise PackError("Duplicate lock priority entry")
-    for package in packages.values():
+    aliases = lock.get("aliases")
+    if (not isinstance(aliases, dict) or set(aliases) != set(manifest["dependencies"])
+        or any(not isinstance(key, str) or key not in packages for key in aliases.values())):
+        raise PackError("Locked aliases must cover every manifest dependency")
+    edges = lock.get("dependencyEdges")
+    if not isinstance(edges, list):
+        raise PackError("Invalid locked dependency edges")
+    edge_keys = set()
+    for edge in edges:
+        if (not isinstance(edge, dict) or not isinstance(edge.get("from"), str) or not isinstance(edge.get("to"), str)
+            or edge["from"] not in packages or edge["to"] not in packages
+            or not isinstance(edge.get("alias"), str) or not edge["alias"]):
+            raise PackError("Dangling or invalid locked dependency edge")
+        identity = (edge["from"], edge["alias"], edge.get("provenance"))
+        if identity in edge_keys:
+            raise PackError("Duplicate locked dependency edge")
+        edge_keys.add(identity)
+    reachable, pending = set(), list(aliases.values())
+    while pending:
+        key = pending.pop()
+        if key not in reachable:
+            reachable.add(key)
+            pending.extend(edge["to"] for edge in edges if edge["from"] == key)
+    if reachable != set(packages):
+        raise PackError("Lock contains packages not reachable from the manifest")
+    components, all_paths = set(), set()
+    def matches_dependency(dependency, package):
+        if dependency.get("integrity") and dependency["integrity"].lower() != "sha256:" + package["artifact"]["sha256"]:
+            return False
+        wanted = dependency["source"]
+        for source in [package["artifact"]["source"], *package.get("sourceReferences", [])]:
+            if source.get("type") != wanted["type"]:
+                continue
+            if all(source.get(field) == value for field, value in wanted.items() if field not in ("channel", "extensions")):
+                return True
+        return wanted["type"] == "local-archive" and bool(dependency.get("integrity"))
+
+    for package_key, package in packages.items():
+        if not isinstance(package, dict) or not isinstance(package.get("component"), str) or not package["component"]:
+            raise PackError("Invalid locked component")
+        if package["component"] in components:
+            raise PackError("Multiple locked assignments for one component")
+        components.add(package["component"])
         artifact = package.get("artifact", {})
         validate_source(artifact.get("source"))
-        if not re.fullmatch(r"[0-9a-f]{64}", artifact.get("sha256", "")) or type(artifact.get("size")) is not int or artifact["size"] < 0:
+        if (not isinstance(artifact.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"])
+            or type(artifact.get("size")) is not int or artifact["size"] < 0):
             raise PackError("Invalid locked artifact digest/size")
         source = artifact["source"]
         if source["type"] == "nexus" and "fileId" not in source:
@@ -86,6 +145,23 @@ def validate_lock(lock, manifest):
             raise PackError("Locked recipe bytes/digest/document differ") from None
         from .planning import validate_recipe
         validate_recipe(package["recipe"]["document"])
+        recipe = package["recipe"]["document"]
+        if package.get("version") != recipe["version"] or package["component"] != recipe["component"]:
+            raise PackError("Locked component/version differs from its recipe")
+        if not isinstance(package.get("options"), dict):
+            raise PackError("Invalid locked options")
+        from .planning import selected_recipe
+        selected, options = selected_recipe(recipe, package["options"])
+        if options != package["options"]:
+            raise PackError("Lock must record every selected recipe option")
+        for alias in selected["dependencies"]:
+            if (package_key, alias, None) not in edge_keys:
+                raise PackError("Lock omits required recipe dependency: " + alias)
+            target = next(edge["to"] for edge in edges if edge["from"] == package_key and edge["alias"] == alias and edge.get("provenance") is None)
+            if not matches_dependency(selected["dependencies"][alias], packages[target]):
+                raise PackError("Locked edge does not satisfy its recipe dependency: " + alias)
+        if not isinstance(package.get("outputs"), list):
+            raise PackError("Invalid locked outputs")
         seen = set()
         for entry in package["outputs"]:
             safe_relative(entry["path"])
@@ -97,8 +173,36 @@ def validate_lock(lock, manifest):
             if entry["class"] not in ("mo2-overlay", "game-root") or entry["path"].casefold() in seen:
                 raise PackError("Invalid or duplicate lock output")
             seen.add(entry["path"].casefold())
-            if len(entry["sha256"]) != 64 or any(c not in "0123456789abcdef" for c in entry["sha256"]):
+            all_paths.add(entry["path"].casefold())
+            if not isinstance(entry.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"]):
                 raise PackError("Invalid output digest")
+    from .planning import validate_output_paths
+    validate_output_paths(all_paths)
+    for alias, dependency in manifest["dependencies"].items():
+        if not matches_dependency(dependency, packages[aliases[alias]]):
+            raise PackError("Locked component does not satisfy manifest source: " + alias)
+    collection = manifest.get("extensions", {}).get("nexusCollection", {})
+    if lock.get("collection", {}) != collection:
+        raise PackError("Locked Collection constraints differ from the manifest")
+    winners = {}
+    for choice in lock.get("fileChoices", []):
+        if (not isinstance(choice, dict) or choice.get("winner") not in packages
+            or choice.get("loser") not in packages or choice["winner"] == choice["loser"]):
+            raise PackError("Invalid locked file winner")
+        path = safe_relative(choice["path"]).casefold()
+        pair = (frozenset((choice["winner"], choice["loser"])), path)
+        if pair in winners:
+            raise PackError("Duplicate locked file choice")
+        winners[pair] = choice["winner"]
+    def locked_winner(request):
+        winner = winners.get((frozenset(request["owners"]), request["path"].casefold()))
+        if winner is None:
+            raise PackError("Lock has an unresolved file conflict: " + request["path"])
+        return winner
+    from .planning import priority_for
+    priority = priority_for(packages, aliases, manifest.get("fileOverrides", []), ask=locked_winner, collection=collection)
+    if priority != lock["priority"]:
+        raise PackError("Locked priority contradicts the recorded file/Collection rules")
 
 
 def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, allow_root=False,
@@ -181,6 +285,12 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                 artifact = store.acquire({"source": package["artifact"]["source"]},
                     Path(package["sourceDocument"]), locked=package["artifact"])
                 archive = store.path(artifact["sha256"])
+                from .planning import outputs_for, selected_recipe
+                selected, _ = selected_recipe(package["recipe"]["document"], package["options"])
+                expected_outputs = outputs_for(archive, selected.get("mappings"), progress, hash_contents=False)
+                locked_outputs = [{field: entry[field] for field in ("member", "path", "class", "size")} for entry in package["outputs"]]
+                if sorted(expected_outputs, key=lambda entry: entry["path"].casefold()) != sorted(locked_outputs, key=lambda entry: entry["path"].casefold()):
+                    raise PackError("Locked output mappings differ from the recipe and archive inventory")
                 stage = safe_join(mo2, ".modlists/" + operation_id + "/s/" + str(index))
                 stage.mkdir(parents=True, exist_ok=True)
                 stage_by_key[key] = stage
