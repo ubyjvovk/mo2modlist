@@ -1,5 +1,19 @@
 # Progress: 2026-09-26
 
+## Current direction: 0.3.0 source-manifest export
+
+The user corrected the snapshot approach: export only the agreed-schema `modlist.json`. The snapshot round-trip evidence below is historical and does not prove the specified source-manifest workflow complete.
+
+- Added the Manifest v1 JSON Schema and strict runtime validation, with no `mode`, blob recipes or snapshot fields in exported JSON.
+- MO2 export prompts for each unknown source: local archive, provider URL, explicit Skip, or cancel. User requested these prompts inside export, not during development. Local references are permitted for testing.
+- Tested those three decisions inside the actual MO2 host (`artifacts/manifest-ui-probe-v1/probe-result.json`); three dependencies were exported, the skipped mod was reported, and only one JSON file was created by export.
+- Exported real Play to `artifacts/Play-manifest/modlist.json`: 15 dependencies; seven Nexus, seven GitHub and AMM as a local archive. DLSS was explicitly skipped as requested. No lockfile or blobs accompany this export.
+- Removed the old bundle importer UI, CLI command, core `import_profile` function and obsolete round-trip import probes/tests. New packages expose export/validation only.
+- Repeated the MO2 dialog test after importer removal (`manifest-ui-probe-v2`): all three source choices and single-file export passed. Thirteen current tests pass, including stale GitHub provenance rejection; removed legacy importer tests are not counted.
+- Remaining work is the actual source-manifest resolver/installer from SPEC.md. Snapshot deployment must not be reported as completion of that workflow.
+
+The sections below describe the earlier snapshot experiment, including functions and helpers since removed.
+
 ## Acceptance target
 
 User requested profile -> modlist -> fresh profile, with Cyberpunk immediately playable; the exact personal configuration is not the product requirement. Current implementation locks installed outputs, reconstructs matching content from pinned archives, and retains local changes in a private bundle.

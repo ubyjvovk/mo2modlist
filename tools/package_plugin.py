@@ -10,8 +10,8 @@ output.parent.mkdir(exist_ok=True)
 with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
     for source, prefix in ((root / "plugin/mo2_modlists_plugin", "plugins/mo2_modlists_plugin"),
                            (root / "mo2_modlists", "plugins/mo2_modlists_plugin/mo2_modlists")):
-        for file in sorted(source.rglob("*.py")):
-            if "__pycache__" not in file.parts:
+        for file in sorted(source.rglob("*")):
+            if file.is_file() and (file.suffix == ".py" or file.name.endswith(".schema.json")) and "__pycache__" not in file.parts:
                 archive.write(file, prefix + "/" + file.relative_to(source).as_posix())
     archive.write(root / "README.md", "MO2-Modlists-README.md")
 with output.open("rb") as stream:

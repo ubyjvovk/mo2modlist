@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MO2 source modlist v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name", "game", "dependencies"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "name": {"type": "string", "minLength": 1},
+    "extensions": {"type": "object"},
+    "game": {
+      "type": "object", "additionalProperties": false, "required": ["id", "dlc"],
+      "properties": {
+        "id": {"const": "cyberpunk2077"}, "version": {"type": "string", "minLength": 1},
+        "dlc": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "extensions": {"type": "object"}
+      }
+    },
+    "dependencies": {"type": "object", "propertyNames": {"minLength": 1}, "additionalProperties": {"$ref": "#/$defs/dependency"}},
+    "fileOverrides": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false, "required": ["winner", "loser", "paths"],
+      "properties": {
+        "winner": {"type": "string", "minLength": 1}, "loser": {"type": "string", "minLength": 1},
+        "paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "extensions": {"type": "object"}
+      }
+    }},
+    "registries": {"type": "object", "additionalProperties": {
+      "type": "object", "additionalProperties": false, "required": ["repository", "revision"],
+      "properties": {"repository": {"type": "string", "minLength": 1}, "revision": {"type": "string", "minLength": 1}, "extensions": {"type": "object"}}
+    }}
+  },
+  "$defs": {
+    "dependency": {
+      "type": "object", "additionalProperties": false, "required": ["source"],
+      "properties": {
+        "source": {"oneOf": [{"$ref": "#/$defs/nexus"}, {"$ref": "#/$defs/github"}, {"$ref": "#/$defs/local"}]},
+        "recipe": {"type": "string", "minLength": 1, "pattern": "^[^\\\\]+$"},
+        "options": {"type": "object"}, "extensions": {"type": "object"},
+        "integrity": {"type": "string", "pattern": "^sha256:[0-9a-fA-F]{64}$"}
+      }
+    },
+    "nexus": {
+      "type": "object", "additionalProperties": false, "required": ["type", "game", "modId"],
+      "properties": {"type": {"const": "nexus"}, "game": {"type": "string", "minLength": 1}, "modId": {"type": "integer", "minimum": 1}, "fileId": {"type": "integer", "minimum": 1}, "extensions": {"type": "object"}}
+    },
+    "github": {
+      "type": "object", "additionalProperties": false, "required": ["type", "repository", "asset"],
+      "oneOf": [{"required": ["tag"], "not": {"required": ["channel"]}}, {"required": ["channel"], "not": {"required": ["tag"]}}],
+      "properties": {
+        "type": {"const": "github-release"},
+        "repository": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$"},
+        "asset": {"type": "string", "minLength": 1, "pattern": "^[^/\\\\]+$"},
+        "tag": {"type": "string", "minLength": 1}, "channel": {"const": "stable"}, "extensions": {"type": "object"}
+      }
+    },
+    "local": {
+      "type": "object", "additionalProperties": false, "required": ["type", "path"],
+      "properties": {"type": {"const": "local-archive"}, "path": {"type": "string", "minLength": 1, "pattern": "^[^\\\\]+$"}, "extensions": {"type": "object"}}
+    }
+  }
+}

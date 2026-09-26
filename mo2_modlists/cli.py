@@ -1,56 +1,38 @@
+"""Source-manifest command line interface. No bundle-import command."""
 import argparse
 import json
 from pathlib import Path
 import sys
 
-from .core import PackError, export_profile, import_profile, verify_bundle
+from .core import PackError
+from .manifest import export_manifest, profile_sources, validate_manifest
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Export/import a private, verified MO2 profile bundle")
+    parser = argparse.ArgumentParser(description="MO2 source manifests")
     sub = parser.add_subparsers(dest="command", required=True)
-    for command in ("export", "import"):
-        p = sub.add_parser(command)
-        p.add_argument("--mo2", required=True, type=Path)
-        p.add_argument("--game", required=True, type=Path)
-        p.add_argument("--profile", required=True)
-        p.add_argument("--bundle", required=True, type=Path)
-        p.add_argument("--user-settings", type=Path)
-        if command == "import":
-            p.add_argument("--allow-root", action="store_true")
-            p.add_argument("--archives", nargs="*", default=[], type=Path)
-            p.add_argument("--download-sources", action="store_true")
-    p = sub.add_parser("verify")
-    p.add_argument("bundle", type=Path)
-    p = sub.add_parser("compact")
-    p.add_argument("--bundle", required=True, type=Path)
-    p.add_argument("--output", required=True, type=Path)
-    p.add_argument("--archives", nargs="+", required=True, type=Path)
-    p.add_argument("--github-manifest", type=Path)
-    p = sub.add_parser("hydrate")
-    p.add_argument("--bundle", required=True, type=Path)
-    p.add_argument("--cache", required=True, type=Path)
-    p.add_argument("--archives", nargs="*", default=[], type=Path)
-    p.add_argument("--download", action="store_true")
+    export = sub.add_parser("export", help="Export only modlist.json")
+    export.add_argument("--mo2", required=True, type=Path)
+    export.add_argument("--game", required=True, type=Path)
+    export.add_argument("--profile", required=True)
+    export.add_argument("--output", required=True, type=Path)
+    export.add_argument("--archives", nargs="*", default=[], type=Path)
+    export.add_argument("--github-manifest", type=Path)
+    export.add_argument("--choices", type=Path, help="Mod-name to dependency mapping; null explicitly skips a mod")
+    validate = sub.add_parser("validate", help="Validate an agreed-schema source manifest")
+    validate.add_argument("manifest", type=Path)
     args = parser.parse_args()
     progress = lambda message: print(message, file=sys.stderr, flush=True)
     try:
         if args.command == "export":
-            result = export_profile(args.mo2, args.game, args.profile, args.bundle, args.user_settings, progress)
-        elif args.command == "import":
-            from .sources import hydrate_bundle
-            hydrate_bundle(args.bundle, args.mo2 / ".modlists/source-cache", args.archives, args.download_sources, progress)
-            result = import_profile(args.bundle, args.mo2, args.game, args.profile,
-                                    args.allow_root, args.user_settings, progress)
-        elif args.command == "compact":
-            from .sources import compact_bundle
-            result = compact_bundle(args.bundle, args.output, args.archives, args.github_manifest, progress)
-        elif args.command == "hydrate":
-            from .sources import hydrate_bundle
-            result = hydrate_bundle(args.bundle, args.cache, args.archives, args.download, progress)
+            candidates = profile_sources(args.mo2, args.profile, [args.mo2 / "downloads"] + args.archives, args.github_manifest)
+            choices = json.loads(args.choices.read_text(encoding="utf-8-sig")) if args.choices else {}
+            selections = {item["name"]: item["dependency"] for item in candidates if item["dependency"] is not None}
+            selections.update(choices)
+            result = export_manifest(args.mo2, args.game, args.profile, args.output, selections, progress)
         else:
-            lock = verify_bundle(args.bundle)
-            result = {"verified": True, "mods": len(lock["layers"])}
+            document = validate_manifest(json.loads(args.manifest.read_text(encoding="utf-8-sig")))
+            result = {"valid": True, "dependencies": len(document["dependencies"])}
         print(json.dumps(result, indent=2))
     except (PackError, OSError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

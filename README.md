@@ -1,81 +1,50 @@
 # MO2 Modlists
 
-Python MO2 extension and independent core for a profile -> modlist -> new profile round trip.
+Version 0.3 exports **one `modlist.json`**, following the source-manifest schema in [SPEC.md](SPEC.md). It does not export a lockfile, blobs or copied archives. The old bundle importer has been removed from the UI, CLI and core.
 
-Validated locally with MO2 2.5.2 and GOG Cyberpunk 2.31: a reconstructed profile loaded an existing save and responded to player controls in a separate game directory. See PROGRESS.md for evidence and limits.
+## Export in MO2
 
-## Working vertical slice
-
-- Export enabled mods in priority order, including the actual installed FOMOD selections.
-- Produce `modlist.json`, `modlist.lock.json` and hash-addressed `blobs/` in a private local bundle.
-- Capture overwrite as a separate highest-priority mod and physical CP77 root additions/replacements identifiable from the installed GOG file list and enabled mod paths.
-- Import into distinct mod directories and a new profile. Verify file hashes before installation; preserve originals when replacing game-root files; roll back ordinary failures.
-- Capture CP77 support-plugin settings such as `disable_crashreporter`.
-- MO2 tool dialog with background progress, cooperative cancellation and import review.
-
-This first slice locks an already-installed profile. Version 0.2 can match installed files to original ZIP/7z members, record exact source artifacts, and retain only unmatched local blobs. Import reconstructs the exact selected members, preserving installed FOMOD choices. GitHub assets can be downloaded; the UI delegates Nexus downloads to MO2, with local archive fallback. Resolving a new dependency graph is still pending. A lone JSON cannot recreate modified or locally generated files. Bundles are personal backup/transfer artifacts, not automatically redistributable modpacks.
-
-## In MO2
-
-Deploy the extension into a disposable MO2 instance first:
+Deploy to a test instance, restart MO2, then choose **Tools → Modlists / Export modlist.json**:
 
 ```powershell
 .\.venv\Scripts\python.exe tools\deploy_plugin.py 'C:\Path\To\TestMO2'
 ```
 
-Restart MO2 and choose **Tools -> Modlists -> Export or import profile**. Export the current profile to a new bundle folder, or select an exported `modlist.json` and choose a new profile name. Review root file deployment before importing. Restart MO2 after import to refresh its profile selector. Game-root files and game-plugin settings affect every profile using that game installation; a second game directory isolates those changes.
+Select the profile, click **Export modlist.json…**, and choose a new filename. Recorded Nexus mod/file IDs and explicitly configured GitHub provenance become dependencies. If a mod has no known source, the export dialog asks you to:
 
-The test-only `tools/mo2_integration_probe.py` must not be included in the shipped plugin.
+- Select an existing local ZIP/7z archive. The manifest stores its path and SHA-256; it is not copied.
+- Provide a Nexus mod/file page URL or exact GitHub release asset URL.
+- Explicitly skip that mod. The completion dialog lists skipped mods.
 
-Export searches MO2's Downloads folder for archives with `.meta` sidecars. Optional plugin settings add archive directories and a GitHub source catalog (an array of `Name`, `Version`, `Url`, `SHA256` records). Unknown files remain bundled. Import checks cached archives first; required Nexus interactions use MO2's normal account/download flow. The live Nexus callback registrations have been tested in MO2, but a new authenticated Nexus transfer still needs integration validation.
+Cancel cancels the whole export. Existing export files are preserved. Other website URLs are not a source type in the agreed schema: download their archive and select it locally.
 
-## Command line
+Additional archive directories and a GitHub source catalog can be configured in the plugin settings. A catalog is an array of `Name`, `Version`, `Url`, `SHA256` records. Sources are not guessed from mod names or archive filenames. GitHub catalog versions must match recorded installed versions when present.
 
-Python 3.12+; the core has no external runtime dependencies. Use an explicit interpreter because the development machine's bare `python` points to an older installation.
+Export includes enabled source dependencies and explicit file-conflict winners derived from the current profile. It does not copy local configuration edits, overwrite contents, root-only additions or saves. Unrecorded FOMOD choices cannot be reconstructed from source references alone; the future importer must request them or use recipes/options. A local archive path is portable only when that archive remains available or is supplied separately.
+
+## CLI
+
+Python 3.12+. `export` and `validate` are the current commands:
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-
 .\.venv\Scripts\python.exe -m mo2_modlists.cli export `
   --mo2 'E:\Modding\Cyberpunk2077' --game 'E:\Games\Cyberpunk 2077' `
-  --profile Play --bundle 'E:\Backups\Play-export'
+  --profile Play --output 'E:\Exports\modlist.json' `
+  --github-manifest 'E:\Modding\downloads\base-mod-manifest.json' `
+  --archives 'E:\Modding\downloads' --choices 'E:\Exports\choices.json'
 
-.\.venv\Scripts\python.exe -m mo2_modlists.cli verify 'E:\Backups\Play-export'
-
-.\.venv\Scripts\python.exe -m mo2_modlists.cli import `
-  --mo2 'E:\Modding\TestMO2' --game 'E:\Games\CP77-test' `
-  --profile 'Imported Play' --bundle 'E:\Backups\Play-export' --allow-root
+.\.venv\Scripts\python.exe -m mo2_modlists.cli validate 'E:\Exports\modlist.json'
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Close Cyberpunk before snapshotting/deploying. Close the destination MO2 before using the CLI importer, which updates its INI; the in-app tool uses MO2's settings API instead. Targets must already contain the matching base game/DLC and a configured MO2 instance. An optional `--user-settings` path opts into copying the local game's settings file. Standard user save folders are not collected; save copies or other personal files inside captured mod/root/overwrite directories are included, so bundles remain private.
+The optional CLI choices file maps exact MO2 mod names to dependency objects; `null` explicitly skips a mod. Unknown sources without a choice block export. Local paths inside dependency objects resolve relative to the exported manifest, not the working directory. The choices file is a CLI input, not an exported artifact. Use the MO2 dialog for interactive source selection.
 
-To compact a full snapshot and reconstruct from pinned sources:
+## Status
 
-```powershell
-.\.venv\Scripts\python.exe -m mo2_modlists.cli compact `
-  --bundle 'E:\Backups\Play-export' --output 'E:\Backups\Play-sources' `
-  --archives 'E:\Modding\Cyberpunk2077\downloads' 'E:\Modding\downloads' `
-  --github-manifest 'E:\Modding\downloads\base-mod-manifest.json'
+Source export is implemented and tested in MO2 2.5.2, including Local archive, URL and Skip. The real Play test export contains 15 dependencies, with AMM referenced locally and DLSS explicitly skipped. Its output directory contains only `modlist.json`.
 
-.\.venv\Scripts\python.exe -m mo2_modlists.cli hydrate `
-  --bundle 'E:\Backups\Play-sources' --cache 'E:\Modding\archive-cache' `
-  --archives 'E:\Modding\Cyberpunk2077\downloads' --download
-```
+**The agreed source-manifest resolver/installer is not yet implemented.** The earlier snapshot round trip demonstrated game deployment but did not satisfy the source-manifest workflow. Version 0.3 deliberately exposes no import action until that workflow exists. No claim is made that the new JSON alone has passed an install/gameplay test.
 
-The CLI's `--download` supports GitHub. For Nexus, supply the exact archive in an `--archives` directory or import through the MO2 tool. `import` also accepts `--archives` and `--download-sources` to perform reconstruction automatically. 7-Zip is required for `.7z` sources. Source files and reconstructed output are both verified against locked hashes.
+The machine-readable schema is [modlist.schema.json](mo2_modlists/modlist.schema.json). Runtime validation additionally checks dependency cross-references and Windows path rules. New dependency resolution, recipes, native metadata acquisition, cache/lock generation and source-based deployment remain the next implementation work described in [SPEC.md](SPEC.md).
 
-## Current limits
-
-- GOG CP77 only for root inventory; target executable/build/DLC identity must match. GOG's file list has paths, not original hashes: unknown modifications to stock files outside enabled mod paths cannot be detected automatically.
-- Standard instance layout (`mods`, `profiles`, `overwrite` together). Existing target overwrite files must match the incoming effective contents (logs/crash dumps are ignored); conflicting contents block import. Export refuses existing destination folders; import refuses existing profiles.
-- The snapshot preserves initial managed file contents, not subsequent game edits, drivers or save state. Runtime databases/settings may change after launching; that is not an import hash failure.
-- No new dependency solver, arbitrary-manifest installation, FOMOD replay, hard-crash resume or automatic root rollback on profile switching yet. Nexus fetching uses MO2 and remains subject to its account/download capabilities.
-- Journals/backups are retained under `.modlists`. Exceptions trigger rollback; a killed process/power failure requires inspection before retrying.
-- Deep destination paths still need broader Windows compatibility testing. Staging uses short names to accommodate MO2's embedded Python host.
-
-## Documents
-
-- [Specification](SPEC.md): broader design and planned source-resolved workflow.
-- [Progress and validation](PROGRESS.md): completed checks and remaining acceptance work.
-- [Illustrative future source manifest](modlist.example.json): placeholder sources, not an installable pack for this preview.
+The disposable integration helpers under `tools/` are not included in the plugin ZIP. Historical validation and current changes are recorded in [PROGRESS.md](PROGRESS.md).

@@ -2,7 +2,7 @@
 
 Status: implementation started, 2026-09-26. This document describes the broader source-resolved design; see PROGRESS.md for the implemented subset and its validation.
 
-First delivery, following the user's acceptance target: export an existing MO2 profile into a private installed-output bundle, then import it into a fresh profile. This captures installer choices and local changes before adding remote reconstruction. Its `mode: installed-snapshot` manifest/lock is distinct from the source-dependency manifest below; the preview must reject unsupported modes rather than pretending to resolve them.
+Export contract, clarified by the user: export only `modlist.json`, using Manifest v1 below. No snapshot lockfile, content blobs or copied archives are part of export. If a source is unknown, ask the user to select an existing local archive, provide a source URL, or explicitly skip the mod. Cancellation cancels the export. A local archive reference remains a reference, not an embedded payload. Lockfiles and caches are products of the resolution/import pipeline. The earlier installed-snapshot prototype is a legacy experiment, not fulfillment of this source-manifest contract.
 
 ## Outcome
 
