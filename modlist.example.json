@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "name": "cyberpunk-mixed-source-example",
+  "game": {
+    "id": "cyberpunk2077",
+    "version": "2.31",
+    "dlc": ["phantom-liberty"]
+  },
+  "dependencies": {
+    "nexus-mod": {
+      "source": {
+        "type": "nexus",
+        "game": "cyberpunk2077",
+        "modId": 12345,
+        "fileId": 67890
+      }
+    },
+    "github-framework": {
+      "source": {
+        "type": "github-release",
+        "repository": "example/framework",
+        "tag": "v1.2.3",
+        "asset": "framework-win64.zip"
+      },
+      "recipe": "./recipes/framework.json"
+    },
+    "local-scene": {
+      "source": {
+        "type": "local-archive",
+        "path": "./downloads/scene.zip"
+      },
+      "recipe": "./recipes/scene.json"
+    }
+  }
+}
