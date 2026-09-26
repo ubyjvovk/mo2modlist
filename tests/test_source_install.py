@@ -84,6 +84,69 @@ class SourceInstallTests(unittest.TestCase):
         import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "New", allow_root=True)
         self.assertEqual(root_file.read_bytes(), b"new")
 
+    def test_successful_root_restore_and_interruption_resume(self):
+        from mo2_modlists.restoration import restoration_plan, restore_root
+        from mo2_modlists.core import json_digest
+        dep = self.dependency("mod", {"bin/x64/loader.dll": b"new", "bin/x64/other.dll": b"added", "r6/scripts/a.reds": b"a"})
+        self.resolve({"mod": dep})
+        original = self.game / "bin/x64/loader.dll"
+        original.write_bytes(b"original")
+        result = import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "New", allow_root=True)
+        operation = Path(result["journal"]).parent.name
+        profile = Path(result["profile"]) / "modlist.txt"
+        before = profile.read_bytes()
+        plan = restoration_plan(self.mo2, self.game, operation)
+        self.assertFalse(plan["blockers"])
+        def fail(phase):
+            raise RuntimeError("restore interrupted")
+        with self.assertRaisesRegex(RuntimeError, "restore interrupted"):
+            restore_root(self.mo2, self.game, operation, reviewed_sha256=json_digest(plan), failure_hook=fail)
+        resumed = restoration_plan(self.mo2, self.game, operation)
+        restore_root(self.mo2, self.game, operation, reviewed_sha256=json_digest(resumed))
+        self.assertEqual(original.read_bytes(), b"original")
+        self.assertFalse((self.game / "bin/x64/other.dll").exists())
+        self.assertEqual(profile.read_bytes(), before)
+        self.assertTrue((self.mo2 / "mods" / result["mods"][0] / "r6/scripts/a.reds").is_file())
+        with self.assertRaisesRegex(PackError, "restored"):
+            import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "New", allow_root=True)
+
+    def test_root_restore_blocks_other_profile_adoption_and_later_edits(self):
+        from mo2_modlists.restoration import restoration_plan, restore_root
+        from mo2_modlists.core import json_digest
+        dep = self.dependency("mod", {"bin/x64/loader.dll": b"new"})
+        self.resolve({"mod": dep})
+        result = import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "New", allow_root=True)
+        operation = Path(result["journal"]).parent.name
+        plan = restoration_plan(self.mo2, self.game, operation)
+        target = self.game / "bin/x64/loader.dll"
+        target.write_bytes(b"user edit")
+        with self.assertRaisesRegex(PackError, "state changed"):
+            restore_root(self.mo2, self.game, operation, reviewed_sha256=json_digest(plan))
+        plan = restoration_plan(self.mo2, self.game, operation)
+        with self.assertRaisesRegex(PackError, "changed after installation"):
+            restore_root(self.mo2, self.game, operation, reviewed_sha256=json_digest(plan))
+        self.assertEqual(target.read_bytes(), b"user edit")
+        target.write_bytes(b"new")
+        import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "Other", allow_root=True)
+        plan = restoration_plan(self.mo2, self.game, operation)
+        with self.assertRaisesRegex(PackError, "Other.*also requires"):
+            restore_root(self.mo2, self.game, operation, reviewed_sha256=json_digest(plan))
+        self.assertEqual(target.read_bytes(), b"new")
+
+    def test_root_restore_rejects_changed_backup_before_mutation(self):
+        from mo2_modlists.restoration import restoration_plan
+        dep = self.dependency("mod", {"bin/x64/loader.dll": b"new"})
+        self.resolve({"mod": dep})
+        target = self.game / "bin/x64/loader.dll"
+        target.write_bytes(b"original")
+        result = import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "New", allow_root=True)
+        journal = Path(result["journal"])
+        backup = next(iter(json.loads(journal.read_text())["root"].values()))["backup"]
+        Path(backup["path"]).write_bytes(b"tampered")
+        with self.assertRaisesRegex(PackError, "backup is missing or changed"):
+            restoration_plan(self.mo2, self.game, journal.parent.name)
+        self.assertEqual(target.read_bytes(), b"new")
+
     def test_publication_journal_failure_recovers_without_replacing_profile(self):
         dep = self.dependency("mod", {"r6/scripts/a.reds": b"a"})
         self.resolve({"mod": dep})

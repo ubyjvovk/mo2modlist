@@ -58,7 +58,7 @@ class ModlistsTool(mobase.IPluginTool):
         return "Export source manifests; resolve and install pinned modlists and review Nexus Collections."
 
     def version(self):
-        return mobase.VersionInfo(0, 5, 0)
+        return mobase.VersionInfo(0, 5, 1)
 
     def settings(self):
         return [mobase.PluginSetting("archive-directories", "Additional download directories, separated by semicolons", ""),
@@ -115,6 +115,9 @@ class ModlistsTool(mobase.IPluginTool):
         layout.addWidget(collection)
         install.clicked.connect(lambda: self.importer.open_manifest(dialog, root, game))
         collection.clicked.connect(lambda: self.importer.open_collection(dialog, root, game))
+        restore = QPushButton("Restore imported game-root files…")
+        layout.addWidget(restore)
+        restore.clicked.connect(lambda: self.importer.open_restoration(dialog, root, game))
         providers = QPushButton("Optional provider credentials…")
         layout.addWidget(providers)
         providers.clicked.connect(lambda: self.importer.configure_provider(dialog))

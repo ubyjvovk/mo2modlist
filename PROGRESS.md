@@ -1,5 +1,17 @@
 # Progress: 2026-09-26
 
+## 0.5.1 reviewed game-root restoration
+
+- The previous goal turn made progress in commit `3ee9b3f`. This continuation added the missing post-install root-restoration workflow in MO2 and CLI. New journals record their exact game target and profile. Older journals without those fields require manual recovery rather than guessing ownership.
+- Restoration previews the affected files, verifies original backups and current owned bytes, checks the operation identity, and binds execution to the reviewed state. It restores originals or removes added files, preserving mod/profile folders. Another imported profile's lock blocks restoration of shared root paths, including identical bytes that it adopted without writing. Other MO2 instances/unmanaged consumers are explicitly outside this ownership check.
+- Interrupted restoration resumes after a fresh review; later user edits and changed backups block it. A restored operation cannot be silently reused as an installation retry. Installing the lock into a new profile deploys it again.
+- 60 tests pass. `artifacts/source-ui-probe-restore1/probe-result.json` records a real MO2 Collection fixture install, one reviewed root-file restoration, and a cached second-profile reinstall. Repeated as `source-ui-probe-restore2` after adding profile/status labels to the operation picker; it also passed. Original selected profile and mod folders were preserved.
+- Inspected the installed CP77 support plugin: its dummy CrashReporter mod is created only when `version.dll` comes from a mod origin, excluding physical `data` origin. The new importer's physical bootstrap path therefore does not inherently require changing that setting; real CET runtime verification is still pending.
+- Prepared the disposable game for source-only smoke testing: moved 315 non-baseline files (708 MB including previous frameworks, DLSS and copied save data) into `test-install/game-root-before-source-smoke`, preserving a full move inventory. The two remaining non-listed root icons are harmless installer assets. The GOG file list gives paths, not authoritative per-file hashes: this is cleanup of the disposable copy, not proof of a pristine vendor-verified game. Earlier fixture profiles are retained as historical evidence and may no longer run after this deliberate test reset.
+- Stable Play's modlist still hashes to `22711d90ca05692f6ef0b8b197ea75982e36ed499cf341a95aa266df44ee44d9`; no stable-game files were changed. Requested a securely configured Nexus key or a full downloaded Collection package for the live provider acceptance step; never requested a key in chat.
+
+Remaining acceptance: authenticated Nexus/representative Collection, real mixed-source source-import and locked profile gameplay, and final spec audit. Goal remains active.
+
 ## 0.5.0 native candidate resolution
 
 - Added resolvelib 1.2.1 as an unmodified vendored dependency with its ISC license. The wheel SHA-256 was checked against PyPI metadata: `fb06b66c8da04172d9e72a21d7d06186d8919e32ae5ab5cdf5b9d920be805ac2`. MO2 needs no runtime pip installation.

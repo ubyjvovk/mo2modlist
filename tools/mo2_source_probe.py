@@ -58,6 +58,9 @@ class Probe(mobase.IPlugin):
                 elif dialog.windowTitle() == "Required Collection instructions":
                     report["instructionAcknowledgements"] = report.get("instructionAcknowledgements", 0) + 1
                     QTimer.singleShot(0, lambda: dialog.done(QMessageBox.StandardButton.Yes))
+                elif dialog.windowTitle() == "Review game-file restoration":
+                    report["restorationReviews"] = report.get("restorationReviews", 0) + 1
+                    QTimer.singleShot(0, lambda: dialog.done(QMessageBox.StandardButton.Ok))
                 elif dialog.icon() == QMessageBox.Icon.Critical:
                     report["messages"].append(dialog.detailedText() or dialog.text())
                     QTimer.singleShot(0, dialog.accept)
@@ -81,6 +84,20 @@ class Probe(mobase.IPlugin):
                 assert (root / "mods" / mods[0] / "r6/scripts/modlists_probe.txt").read_text() == "source importer fixture"
                 return mods
             report["firstMods"] = run(self.output.name + " First")
+            restore_run = os.environ.get("MO2_SOURCE_PROBE_RESTORE")
+            if restore_run:
+                root_file = game / ("bin/x64/modlists-probe-" + restore_run + ".txt")
+                assert root_file.read_text() == "physical root fixture"
+                operations = [p.parent.name for p in (root / ".modlists").glob("*/journal.json")
+                    if json.loads(p.read_text()).get("profileName") == self.output.name + " First"]
+                assert len(operations) == 1
+                with patch.object(QInputDialog, "getItem", side_effect=lambda *args, **kwargs: (next(label for label in args[3] if operations[0] in label), True)), \
+                     patch.object(QMessageBox, "exec", choose), \
+                     patch.object(QMessageBox, "information", side_effect=lambda *a: report["messages"].append(a[2])):
+                    tool.importer.open_restoration(parent, root, game)
+                assert report["restorationReviews"] == 1
+                assert not root_file.exists()
+                report["rootRestored"] = True
             (self.output / "fixture.zip").rename(self.output / "fixture.zip.saved")
             (self.output / "fixture.recipe.json").rename(self.output / "fixture.recipe.json.saved")
             report["cachedMods"] = run(self.output.name + " Cached")

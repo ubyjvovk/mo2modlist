@@ -21,6 +21,11 @@ def main():
     export.add_argument("--choices", type=Path, help="Mod-name to dependency mapping; null explicitly skips a mod")
     validate = sub.add_parser("validate", help="Validate an agreed-schema source manifest")
     validate.add_argument("manifest", type=Path)
+    restore = sub.add_parser("restore-root", help="Review or restore physical game files owned by an import")
+    restore.add_argument("--mo2", required=True, type=Path)
+    restore.add_argument("--game", required=True, type=Path)
+    restore.add_argument("--operation", required=True)
+    restore.add_argument("--reviewed-sha256", help="Apply the exact plan digest returned by the read-only invocation")
     for command in ("inspect", "verify"):
         action = sub.add_parser(command, help="Inspect a lock or verify its managed installed files without changing them")
         action.add_argument("--manifest", required=True, type=Path)
@@ -58,6 +63,15 @@ def main():
             selections = {item["name"]: item["dependency"] for item in candidates if item["dependency"] is not None}
             selections.update(choices)
             result = export_manifest(args.mo2, args.game, args.profile, args.output, selections, progress)
+        elif args.command == "restore-root":
+            from .restoration import restoration_plan, restore_root
+            from .core import json_digest
+            if args.reviewed_sha256:
+                result = restore_root(args.mo2, args.game, args.operation,
+                    reviewed_sha256=args.reviewed_sha256, progress=progress)
+            else:
+                result = restoration_plan(args.mo2, args.game, args.operation)
+                result = {"plan": result, "reviewedSha256": json_digest(result)}
         elif args.command == "validate":
             document = validate_manifest(json.loads(args.manifest.read_text(encoding="utf-8-sig")))
             result = {"valid": True, "dependencies": len(document["dependencies"])}

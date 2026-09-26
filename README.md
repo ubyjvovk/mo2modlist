@@ -30,11 +30,13 @@ Review the resulting components and physical game-folder writes, then install. T
 
 Retry the same manifest/lock and profile name after an interrupted operation. Verified cached archives and staging are reused. A completed profile is never overwritten. Restart MO2 to refresh its profile selector and select the new profile manually.
 
+**Restore imported game-root files…** reviews the physical changes owned by an installation, restores verified backups and removes files that installation added. Mod/profile folders remain, but the selected profile will no longer have those root files. Changed files, damaged backups and other imported profiles requiring the same paths block restoration. Interrupted restoration can be reviewed and resumed. This tracks consumers within this MO2 instance; other instances and unmanaged consumers are not detectable. Older journals without recorded game/profile targets require manual recovery from their backups.
+
 **Import Nexus Collection…** accepts a full downloaded package, saved review draft or Collection URL. Optional entries and supported ordering/dependency rules are retained; embedded archives are extracted and verified. Unhandled installer choices/patches can be supplied as a prepared archive plus recipe with an explicit handoff record. Other unresolved instructions produce a review draft, not a completed pack. Collection-level external steps require acknowledgement for each installation target. URL downloads use the optional stored Nexus API key when required; the downloaded-package route is also available. MO2's supported download manager handles individual Nexus mod archives.
 
 ## CLI
 
-Python 3.12+. Commands are `export`, `validate`, `resolve`, `install`, `import`, `import-collection`, `inspect` and `verify`:
+Python 3.12+. Commands are `export`, `validate`, `resolve`, `install`, `import`, `import-collection`, `inspect`, `verify` and `restore-root`:
 
 ```powershell
 .\.venv\Scripts\python.exe -m mo2_modlists.cli export `
@@ -55,6 +57,8 @@ The optional CLI choices file maps exact MO2 mod names to dependency objects; `n
 
 `inspect` reports a validated lock's components, sources, ordering, physical game files and prerequisites without installing. `verify` checks the installed profile's managed initial files, component identities and enabled ordering against that lock, returning a nonzero exit status for differences. Runtime edits and extra files inside installed mod directories are reported; neither unmanaged game-folder files nor gameplay compatibility are covered. Verification never repairs or removes files.
 
+`restore-root --mo2 <instance> --game <game> --operation <operation-id>` prints a read-only restoration plan and `reviewedSha256`. Repeat with `--reviewed-sha256 <digest>` to apply that exact reviewed state. The operation ID is the journal's parent directory under `.modlists`. Any intervening change requires a new review.
+
 ## Status
 
 Source export is implemented and tested in MO2 2.5.2, including Local archive, URL and Skip. The real Play test export contains 15 dependencies, with AMM referenced locally and DLSS explicitly skipped. Its output directory contains only `modlist.json`.
@@ -63,7 +67,7 @@ The source importer has passed a tiny real-MO2 test: source JSON plus recipe/arc
 
 Nexus native dependency domains are solved with vendored resolvelib 1.2.1. Shared constraints intersect and incompatible candidates backtrack, including alternatives across file lineages. Exact pack pins constrain the result. Candidate selection was exercised inside real MO2; fixture tests cover transitive incompatibilities, cycles, missing DLC and unsatisfiable reason chains.
 
-**The full specification is not complete.** Live authenticated provider and representative Collection validation, broader crash recovery and root restoration, fresh-instance prerequisites and the real mixed-source game smoke test remain. The historical snapshot game's successful launch does not verify the new source importer.
+**The full specification is not complete.** Live authenticated provider and representative Collection validation, broader crash recovery, fresh-instance runtime verification and the real mixed-source game smoke test remain. The historical snapshot game's successful launch does not verify the new source importer.
 
 Optional **Provider credentials…** stores a Nexus API key or GitHub token in Windows Credential Manager. A Nexus key enables the isolated v3 metadata adapter and Collection package requests. It enumerates file lineages and versions, retains raw and materialized dependency definitions, and locks the solver's selections. An ambiguous top-level mod page still requires an explicit file choice. Empty new-style requirements remain unknown because the current GET schema does not identify whether legacy page requirements apply. Optional GitHub authentication applies to release metadata requests. No credential is exported or read from MO2's private credential storage.
 

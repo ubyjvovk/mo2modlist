@@ -250,6 +250,10 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
         journal["acknowledgedPrerequisites"] = sorted(required)
         if journal["lockSha256"] != json_digest(lock):
             raise PackError("Operation journal belongs to a different plan")
+        if journal["status"] in ("restoring-root", "root-restored"):
+            raise PackError("This operation's root files are being restored or have been restored; install into a new profile")
+        journal["targetGame"] = str(game)
+        journal["profileName"] = profile_name
         if profile.exists():
             if journal_path.exists() and journal["status"] == "publishing" and (profile / "modlist.lock.json").is_file():
                 published = json.loads((profile / "modlist.lock.json").read_text(encoding="utf-8"))

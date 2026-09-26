@@ -216,6 +216,38 @@ class ImportController(QObject):
             self.tool.run_job(parent, install, completed)
         self.tool.run_job(parent, plan, review)
 
+    def open_restoration(self, parent, root, game):
+        from .mo2_modlists.restoration import restoration_plan, restore_root
+        operations = sorted(path.parent.name for path in (root / ".modlists").glob("*/journal.json"))
+        if not operations:
+            QMessageBox.information(parent, "Restore game files", "No import operations have been recorded in this instance.")
+            return
+        labels = []
+        for operation in operations:
+            journal = json.loads((root / ".modlists" / operation / "journal.json").read_text(encoding="utf-8-sig"))
+            labels.append(f"{journal.get('profileName', 'Legacy import')} — {journal.get('status', 'unknown')} ({operation})")
+        chosen, accepted = QInputDialog.getItem(parent, "Restore game files", "Installation operation:", labels, 0, False)
+        if not accepted:
+            return
+        operation = operations[labels.index(chosen)]
+        def review(plan):
+            if plan["blockers"]:
+                QMessageBox.warning(parent, "Restoration blocked", "\n".join(plan["blockers"]))
+                return
+            message = QMessageBox(QMessageBox.Icon.Warning, "Review game-file restoration",
+                f"Restore {len(plan['files'])} physical files from '{plan['profile']}'.\n\n" + plan["notice"],
+                QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, parent)
+            message.setTextFormat(Qt.TextFormat.PlainText)
+            message.setDetailedText(json.dumps(plan, indent=2))
+            if message.exec() != QMessageBox.StandardButton.Ok:
+                return
+            self.tool.run_job(parent, lambda report: restore_root(root, game, operation,
+                reviewed_sha256=json_digest(plan), progress=report),
+                lambda result: QMessageBox.information(parent, "Game files restored",
+                    f"Restored {result['restoredFiles']} files. Profile and mod folders were preserved.\n"
+                    "Install the lock into a new profile to deploy its root files again."))
+        self.tool.run_job(parent, lambda report: restoration_plan(root, game, operation), review)
+
     def open_collection(self, parent, root, game):
         from .mo2_modlists.collections import (read_collection, fetch_collection, convert_collection, write_collection_manifest,
                                              bundled_dependency, installer_fields, entry_source, handoff_complete)
