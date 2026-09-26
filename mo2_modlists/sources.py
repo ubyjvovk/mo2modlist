@@ -11,6 +11,7 @@ import os
 import re
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import urllib.parse
 import urllib.request
@@ -49,12 +50,15 @@ def members(path: Path):
         with zipfile.ZipFile(path) as archive:
             seen = set()
             for member in archive.infolist():
+                if stat.S_ISLNK(member.external_attr >> 16):
+                    raise PackError("Archive links are unsupported")
+                safe_relative(member.filename.rstrip("/"))
                 if member.is_dir():
                     continue
                 name = safe_relative(member.filename)
-                if name in seen:
+                if name.casefold() in seen:
                     raise PackError(f"Duplicate archive member: {name}")
-                seen.add(name)
+                seen.add(name.casefold())
                 yield name, member.file_size
         return
     command = [seven_zip(), "l", "-slt", "-ba", "-p-", "-sccUTF-8", "--", str(path)]
@@ -69,17 +73,18 @@ def members(path: Path):
         if "Symbolic Link" in info or "Hard Link" in info:
             raise PackError("Archive links are unsupported")
         name = safe_relative(info["Path"].replace("\\", "/"))
-        if name in seen:
+        if name.casefold() in seen:
             raise PackError(f"Duplicate archive member: {name}")
-        seen.add(name)
+        seen.add(name.casefold())
         yield name, int(info["Size"])
 
 
-def stream_member(path: Path, member: str, output=None):
+def stream_member(path: Path, member: str, output=None, progress=lambda text: None):
     safe_relative(member)
     h = hashlib.sha256()
     def consume(stream):
         while chunk := stream.read(1024 * 1024):
+            progress("Reading " + member)
             h.update(chunk)
             if output is not None:
                 output.write(chunk)

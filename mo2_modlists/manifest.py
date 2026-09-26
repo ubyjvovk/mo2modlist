@@ -157,6 +157,22 @@ def profile_sources(mo2: Path, profile: str, archive_dirs=(), github_catalog=Non
         ini = read_ini(mo2 / "mods" / name / "meta.ini")
         general = ini["General"] if ini.has_section("General") else {}
         dependency = None
+        provenance_path = safe_join(mo2, ".modlists/installed/" + name + ".json")
+        if provenance_path.is_file():
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8-sig"))
+            artifact = provenance["artifact"]
+            source = dict(artifact["source"])
+            validate_source(source)
+            if source["type"] == "local-archive":
+                hint = Path(source["path"])
+                if not hint.is_absolute():
+                    hint = Path(provenance["sourceDocument"]).parent / hint
+                source["path"] = hint.resolve().as_posix()
+            dependency = {"source": source, "integrity": "sha256:" + artifact["sha256"]}
+            if provenance.get("options"):
+                dependency["options"] = provenance["options"]
+            result.append({"name": name, "dependency": dependency})
+            continue
         record = catalog.get(name.casefold())
         def normalized_version(value):
             value = value.removeprefix("v")

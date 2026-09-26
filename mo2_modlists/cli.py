@@ -21,6 +21,25 @@ def main():
     export.add_argument("--choices", type=Path, help="Mod-name to dependency mapping; null explicitly skips a mod")
     validate = sub.add_parser("validate", help="Validate an agreed-schema source manifest")
     validate.add_argument("manifest", type=Path)
+    for command in ("resolve", "install", "import"):
+        action = sub.add_parser(command, help="Resolve sources or deploy a verified source lock")
+        action.add_argument("--manifest", required=True, type=Path)
+        action.add_argument("--lock", required=True, type=Path)
+        action.add_argument("--cache", required=True, type=Path)
+        action.add_argument("--archives", nargs="*", default=[], type=Path)
+        action.add_argument("--game", required=True, type=Path)
+        action.add_argument("--offline", action="store_true")
+        if command != "resolve":
+            action.add_argument("--mo2", required=True, type=Path)
+            action.add_argument("--profile", required=True)
+            action.add_argument("--allow-root", action="store_true")
+    collection = sub.add_parser("import-collection", help="Convert a Nexus Collection package or URL; unresolved choices block finalization")
+    origin = collection.add_mutually_exclusive_group(required=True)
+    origin.add_argument("--file", type=Path)
+    origin.add_argument("--url")
+    collection.add_argument("--output", required=True, type=Path)
+    collection.add_argument("--cache", type=Path)
+    collection.add_argument("--decisions", type=Path)
     args = parser.parse_args()
     progress = lambda message: print(message, file=sys.stderr, flush=True)
     try:
@@ -30,11 +49,36 @@ def main():
             selections = {item["name"]: item["dependency"] for item in candidates if item["dependency"] is not None}
             selections.update(choices)
             result = export_manifest(args.mo2, args.game, args.profile, args.output, selections, progress)
-        else:
+        elif args.command == "validate":
             document = validate_manifest(json.loads(args.manifest.read_text(encoding="utf-8-sig")))
             result = {"valid": True, "dependencies": len(document["dependencies"])}
+        elif args.command == "import-collection":
+            from .collections import fetch_collection, read_collection, convert_collection, write_collection_manifest
+            path, identity = args.file, None
+            if args.url:
+                if args.cache is None:
+                    raise PackError("--cache is required for collection URL downloads")
+                path, identity = fetch_collection(args.url, args.cache, progress=progress)
+            decisions = json.loads(args.decisions.read_text(encoding="utf-8-sig")) if args.decisions else {}
+            draft = convert_collection(read_collection(path), identity=identity, decisions=decisions)
+            write_collection_manifest(draft, args.output)
+            result = {"manifest": str(args.output), "dependencies": len(draft["manifest"]["dependencies"]), "notes": draft["notes"]}
+        else:
+            from .acquisition import ArtifactStore
+            from .planning import resolve_manifest
+            from .install import import_lock
+            store = ArtifactStore(args.cache, args.archives, offline=args.offline, progress=progress)
+            if args.command == "resolve" or (args.command == "import" and not args.lock.exists()):
+                lock = resolve_manifest(args.manifest, store, args.game, args.lock, progress=progress)
+                result = {"lock": str(args.lock), "packages": len(lock["packages"])}
+            if args.command != "resolve":
+                result = import_lock(args.manifest, args.lock, store, args.mo2, args.game, args.profile,
+                                     allow_root=args.allow_root, progress=progress)
         print(json.dumps(result, indent=2))
     except (PackError, OSError, ValueError) as exc:
+        if hasattr(exc, "request"):
+            print(json.dumps({"inputRequired": exc.request}, indent=2), file=sys.stderr)
+            return 2
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     return 0

@@ -46,7 +46,7 @@ def safe_relative(value: str) -> str:
     for part in parts:
         if (part in ("", ".", "..") or part.rstrip(" .") != part
                 or re.search(r'[<>:"|?*\x00-\x1f]', part)
-                or re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?", part)):
+                or re.fullmatch(r"(?i)(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?", part)):
             raise PackError(f"Unsafe Windows path: {value!r}")
     return PurePosixPath(*parts).as_posix()
 

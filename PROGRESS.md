@@ -1,5 +1,34 @@
 # Progress: 2026-09-26
 
+## Current implementation: 0.4.0 source importer (goal remains active)
+
+Implemented after the user requested the spec importer and Nexus lists:
+
+- Source acquisition for exact Nexus archives (local MO2 download metadata or supported MO2 download-manager callback), exact/stable GitHub release assets with release/asset identity checks, and referenced local archives. SHA-256 cache entries are verified before reuse. Downloads retain partials and resume only with a matching server validator. Credentials/download URLs are not written into locks.
+- Recipe-based transitive graph expansion with exact component/version/artifact identity, full reason chains, satisfiable repeated dependencies, finite options, explicit dependency alternatives, variants, declared conflicts, game/DLC requirements and archive mappings. Missing dependency metadata stays unknown and requires a recipe; native provider normalization is still pending.
+- Optional Git registry index: resolve one commit, read blobs without checkout, verify index recipe hashes, cache recipes and retain correction reasons/provenance. Conflicting corrections require a choice. Cached exact commits work offline.
+- Inspected locks retain the semantic manifest digest, game identity/version, exact artifact IDs/hashes/sizes, recipe bytes/hash/document, options/selected alternatives, graph edges, output hashes/destinations, ordering, registry commits and Collection rules. Lock installation does not re-resolve metadata.
+- New source deployment stages files, uses independently writable mod directories, serializes instance installation with an OS-released lock, journals root backups and progress, restores unchanged owned root outputs after failure, and publishes the profile last. A failure between publication and the final journal write is recoverable. Existing profiles/mods are not replaced; incompatible Overwrite files block installation. A child process was terminated with os._exit during a root write; retry completed and retained the original backup. Broader crash coverage and ownership restoration UI remain pending.
+- Real MO2 UI now exposes source manifest/lock installation and Collection import. Worker input requests cross to the owning Qt thread; selected recipes/options/winners persist in an import choices sidecar. A final review lists components and physical root effects. Individual Nexus downloads reuse MO2's supported service callbacks.
+- Collection reader handles full JSON/ZIP/7z packages, URL/NXM revision identity, optional inclusion, exact Nexus/GitHub sources, exact rule-reference matching, before/after ordering, requires/recommends, conflict rejection and file winners. Unsupported patches/installer choices/bundled assets/instructions and fuzzy references remain explicit review requests with the full original document retained; they are not silently considered installed.
+- Imported mod source provenance is stored outside mod file trees and is recoverable by subsequent manifest export. Export remains one agreed-schema JSON.
+
+Validation this iteration:
+
+- 35 core tests passed at this checkpoint. Added tests cover transitive source installs and offline retry, exact conflicts/reason chains, variant output identities, selected alternatives, source provenance re-export, tampered recipe bytes, failed root deployment restoration, final publication recovery, server-validated range resume, archive aliases/links, registry pin/cache verification and Collection semantics.
+- `artifacts/source-ui-probe-v3/probe-result.json`: passed in real MO2 2.5.2/Python 3.12.3/PyQt6. A recipe was selected on the UI thread, a plan reviewed, a new profile installed and a second profile installed from the cache/lock after moving original recipe/archive files away. Both installed file contents matched. Existing selected profile hash stayed unchanged. Probe v2 also passed; v1 correctly blocked on leftover Overwrite content from prior gameplay. The disposable Overwrite was preserved as `test-install/MO2/overwrite-before-source-import-v2` before retry.
+- Live Collection service check: the public CET+Essentials revision lookup reached the package-download step, which requires authentication. A different Collection returned `ADULT_CONTENT_BLOCKED`, now surfaced as a provider code without bypassing its content flow. No authenticated Collection transfer has been proven. Source references: Nexus-Mods/extension-collections and Nexus-Mods/node-nexus-api, cached read-only under ignored artifacts/references.
+- Development deployment remains only in the disposable MO2 instance. No new source-manifest gameplay smoke check has been performed. Historical bundle gameplay below is not evidence for this importer.
+
+Remaining acceptance work (do not mark the goal complete yet):
+
+1. Native metadata/candidate normalization, particularly Nexus file-level requirements and file selection; explicit range/comparison schemes and automatic compatible-alternative solving if needed. Current recipe alternatives require an explicit finite option.
+2. Complete manual handoffs for Collection installation instructions/patches, bundled archives and other source sites; authenticated Collection URL download and live MO2 Nexus archive transfer. Validate a representative real Collection, not just fixtures.
+3. Additional deployment hardening: broaden hard-process interruption coverage, complete lock validation and root ownership/restoration experience; CP77 support-plugin prerequisites for fresh instances.
+4. Final mixed-source CP77 pack from a source manifest (Nexus + GitHub + local + transitive dependency), locked fresh-profile reproduction and game smoke check. Preserve the user's Play profile and stable game.
+
+See RECIPES.md for the implemented recipe/registry format. Documentation intentionally distinguishes this preview from full SPEC.md acceptance.
+
 ## Current direction: 0.3.0 source-manifest export
 
 The user corrected the snapshot approach: export only the agreed-schema `modlist.json`. The snapshot round-trip evidence below is historical and does not prove the specified source-manifest workflow complete.

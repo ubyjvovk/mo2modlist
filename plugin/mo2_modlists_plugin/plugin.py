@@ -41,6 +41,8 @@ class ModlistsTool(mobase.IPluginTool):
 
     def init(self, organizer):
         self.organizer = organizer
+        from .import_ui import ImportController
+        self.importer = ImportController(self)
         return True
 
     def name(self):
@@ -53,10 +55,10 @@ class ModlistsTool(mobase.IPluginTool):
         return "MO2 Modlists contributors"
 
     def description(self):
-        return "Export source manifests using the agreed modlist.json schema."
+        return "Export source manifests; resolve and install pinned modlists and review Nexus Collections."
 
     def version(self):
-        return mobase.VersionInfo(0, 3, 0)
+        return mobase.VersionInfo(0, 4, 0)
 
     def settings(self):
         return [mobase.PluginSetting("archive-directories", "Additional download directories, separated by semicolons", ""),
@@ -67,7 +69,7 @@ class ModlistsTool(mobase.IPluginTool):
         return [root / "downloads"] + [Path(p.strip()) for p in extra.split(";") if p.strip()]
 
     def displayName(self):
-        return "Modlists / Export modlist.json"
+        return "Modlists / Export or install"
 
     def tooltip(self):
         return self.description()
@@ -95,17 +97,24 @@ class ModlistsTool(mobase.IPluginTool):
             QMessageBox.critical(self.parent, self.name(), str(exc))
             return
         dialog = QDialog(self.parent)
-        dialog.setWindowTitle("MO2 Modlists — export source manifest")
+        dialog.setWindowTitle("MO2 Modlists — source manifests")
         dialog.resize(580, 260)
         layout = QVBoxLayout(dialog)
         label = QLabel(f"Current profile: {profile}\n\nExport one modlist.json containing Nexus, GitHub or local archive references.\n"
                        "Unknown sources: choose a local archive, provide a URL, or explicitly skip.\n"
-                       "Local edits and installer choices are not exported. Source-manifest installation is still in development.")
+                       "Import resolves sources and creates a separate profile. Unknown dependencies require a recipe.\n"
+                       "Local edits and unrecorded installer choices are not exported.")
         label.setWordWrap(True)
         layout.addWidget(label)
         export = QPushButton("Export modlist.json…")
         layout.addWidget(export)
         export.clicked.connect(lambda: self.export_clicked(dialog, root, game, profile))
+        install = QPushButton("Install modlist.json or lock…")
+        collection = QPushButton("Import Nexus Collection…")
+        layout.addWidget(install)
+        layout.addWidget(collection)
+        install.clicked.connect(lambda: self.importer.open_manifest(dialog, root, game))
+        collection.clicked.connect(lambda: self.importer.open_collection(dialog, root, game))
         dialog.exec()
 
     def run_job(self, parent, function, done):
