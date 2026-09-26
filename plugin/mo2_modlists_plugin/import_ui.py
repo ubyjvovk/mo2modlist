@@ -4,9 +4,9 @@ from pathlib import Path
 import threading
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
-from PyQt6.QtWidgets import QFileDialog, QInputDialog, QMessageBox
+from PyQt6.QtWidgets import QFileDialog, QInputDialog, QMessageBox, QLineEdit
 
-from .mo2_modlists.acquisition import ArtifactStore, InputRequired
+from .mo2_modlists.acquisition import ArtifactStore, InputRequired, json_request
 from .mo2_modlists.core import PackError, json_digest, write_json
 from .mo2_modlists.install import import_lock, validate_lock
 from .mo2_modlists.manifest import validate_manifest
@@ -62,7 +62,7 @@ class ImportController(QObject):
                 if not filename:
                     raise PackError("Recipe selection cancelled; the plan remains incomplete")
                 answer = Path(filename).resolve().as_posix()
-            elif kind in ("recipe-option", "file-conflict", "registry-recipe"):
+            elif kind in ("recipe-option", "file-conflict", "registry-recipe", "nexus-file", "nexus-dependency"):
                 values = request.get("choices", request.get("owners"))
                 labels = [str(v) for v in request.get("labels", values)]
                 # Include index so equal display names remain distinguishable.
@@ -94,8 +94,41 @@ class ImportController(QObject):
             pending["event"].set()
 
     def store(self, root, archives, report):
+        from .mo2_modlists.credentials import headers
+        from .mo2_modlists.nexus import NexusProvider
+        github_headers = headers("github")
+        nexus_headers = headers("nexus")
         return ArtifactStore(root / ".modlists/source-cache", archives, progress=report,
-            nexus_fetch=lambda source: self.ask({"kind": "nexus-download", "source": source}), manual_fetch=self.ask)
+            nexus_fetch=lambda source: self.ask({"kind": "nexus-download", "source": source}), manual_fetch=self.ask,
+            nexus_metadata=NexusProvider(nexus_headers) if nexus_headers else None,
+            request=lambda url: json_request(url, headers=github_headers))
+
+    def configure_provider(self, parent):
+        from .mo2_modlists.credentials import save, remove
+        label, accepted = QInputDialog.getItem(parent, "Optional provider sign-in", "Credential to configure:",
+            ["Nexus API key", "GitHub token"], 0, False)
+        if not accepted:
+            return
+        provider = "nexus" if label == "Nexus API key" else "github"
+        action, accepted = QInputDialog.getItem(parent, label, "Store or remove this extension's credential:",
+            ["Store credential", "Remove stored credential"], 0, False)
+        if not accepted:
+            return
+        try:
+            if action == "Remove stored credential":
+                remove(provider)
+            else:
+                location = "https://www.nexusmods.com/settings/api-keys" if provider == "nexus" else "https://github.com/settings/tokens"
+                secret, accepted = QInputDialog.getText(parent, label,
+                    f"Create your own credential using the provider's supported flow:\n{location}\n\n"
+                    "It is stored only in Windows Credential Manager. MO2's existing Nexus sign-in still handles individual mod downloads.\n"
+                    "This optional key enables Collection/API metadata requests.\n\nCredential:", QLineEdit.EchoMode.Password)
+                if not accepted:
+                    return
+                save(provider, secret)
+            QMessageBox.information(parent, "Provider credential", "Credential updated in Windows Credential Manager. It is never exported into manifests or locks.")
+        except PackError as exc:
+            QMessageBox.warning(parent, "Provider credential", str(exc))
 
     def open_manifest(self, parent, root, game, filename=None):
         if filename is None:
@@ -157,7 +190,8 @@ class ImportController(QObject):
             message = QMessageBox(QMessageBox.Icon.Question, "Review source installation", text,
                 QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, parent)
             message.setDetailedText(json.dumps({"components": [{"component": p["component"], "version": p["version"],
-                "source": p["artifact"]["source"], "sha256": p["artifact"]["sha256"], "reason": p["reason"], "options": p["options"]}
+                "source": p["artifact"]["source"], "sha256": p["artifact"]["sha256"], "reason": p["reason"], "options": p["options"],
+                "metadata": p.get("metadataProvenance"), "recipeSha256": p["recipe"]["sha256"]}
                 for p in lock["packages"].values()], "physicalGameFiles": sorted(root_entries),
                 "externalPrerequisites": lock["externalPrerequisites"], "lock": str(lock_path)}, indent=2))
             if message.exec() != QMessageBox.StandardButton.Ok:
@@ -192,7 +226,8 @@ class ImportController(QObject):
         destination = Path(output)
         def load(report):
             if choice == "Nexus Collection URL":
-                path, identity = fetch_collection(source, root / ".modlists/source-cache", progress=report)
+                from .mo2_modlists.credentials import headers
+                path, identity = fetch_collection(source, root / ".modlists/source-cache", progress=report, headers=headers("nexus"))
             else:
                 path, identity = Path(source), None
             return read_collection(path), identity

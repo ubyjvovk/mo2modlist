@@ -65,9 +65,15 @@ def main():
             result = {"manifest": str(args.output), "dependencies": len(draft["manifest"]["dependencies"]), "notes": draft["notes"]}
         else:
             from .acquisition import ArtifactStore
+            from .acquisition import json_request
+            from .credentials import headers
+            from .nexus import NexusProvider
             from .planning import resolve_manifest
             from .install import import_lock
-            store = ArtifactStore(args.cache, args.archives, offline=args.offline, progress=progress)
+            nexus_headers, github_headers = headers("nexus"), headers("github")
+            store = ArtifactStore(args.cache, args.archives, offline=args.offline, progress=progress,
+                nexus_metadata=NexusProvider(nexus_headers) if nexus_headers and not args.offline else None,
+                request=lambda url: json_request(url, headers=github_headers))
             if args.command == "resolve" or (args.command == "import" and not args.lock.exists()):
                 lock = resolve_manifest(args.manifest, store, args.game, args.lock, progress=progress)
                 result = {"lock": str(args.lock), "packages": len(lock["packages"])}

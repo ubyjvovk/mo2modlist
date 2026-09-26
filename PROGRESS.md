@@ -2,6 +2,14 @@
 
 ## Current implementation: 0.4.0 source importer (goal remains active)
 
+Follow-up to commit `4990eae`:
+
+- Added optional Nexus/GitHub credential controls backed by Windows Credential Manager. An isolated random test credential was written/read/deleted successfully; no real account key was requested or copied from MO2. Individual Nexus mod downloads continue through MO2's service. The optional Nexus key is used for Collection and metadata requests; GitHub token headers are used for release metadata.
+- Added an isolated adapter for the current experimental Nexus v3 endpoints, based on the official Vortex OpenAPI schema. It enumerates page file lineages and versions, verifies a file belongs to the requested mod, retains raw/materialized requirements, detects changed definition IDs and converts selected candidate versions into pinned Nexus dependencies. Empty new-style requirements remain unknown rather than concealing legacy page requirements. Multiple eligible candidates require a choice; automatic compatible-candidate solving is still pending.
+- Native metadata can generate an artifact-bound recipe and expand transitive dependencies; an integration fixture tests native metadata -> recipe-backed Nexus dependency -> installed profile. Native required edges are retained alongside explicit local installation recipes. First-observed artifact hashes retain their locally-observed status. Native DLC IDs 1/2 were checked live against the public CP77 DLC endpoint and map to Phantom Liberty/REDmod.
+- 42 tests now pass, including Credential Manager round-trip, native source normalization, file selection, empty legacy-unknown metadata, changed range snapshots, DLC mapping and transitive native installation.
+- `source-ui-probe-v5` passed after these changes: source installation, Qt-thread input, preserved original profile and cache-only second profile. Source Play's hash remains the recorded `22711d90ca05692f6ef0b8b197ea75982e36ed499cf341a95aa266df44ee44d9`. No live authenticated native metadata/Collection transfer or new source-manifest gameplay acceptance is claimed.
+
 Implemented after the user requested the spec importer and Nexus lists:
 
 - Source acquisition for exact Nexus archives (local MO2 download metadata or supported MO2 download-manager callback), exact/stable GitHub release assets with release/asset identity checks, and referenced local archives. SHA-256 cache entries are verified before reuse. Downloads retain partials and resume only with a matching server validator. Credentials/download URLs are not written into locks.

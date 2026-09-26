@@ -13,7 +13,10 @@ with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         for file in sorted(source.rglob("*")):
             if file.is_file() and (file.suffix == ".py" or file.name.endswith(".schema.json")) and "__pycache__" not in file.parts:
                 archive.write(file, prefix + "/" + file.relative_to(source).as_posix())
-    archive.write(root / "README.md", "MO2-Modlists-README.md")
+    readme = (root / "README.md").read_text(encoding="utf-8").replace("(mo2_modlists/", "(plugins/mo2_modlists_plugin/mo2_modlists/")
+    archive.writestr("MO2-Modlists-README.md", readme)
+    for name in ("SPEC.md", "RECIPES.md", "PROGRESS.md"):
+        archive.write(root / name, name)
 with output.open("rb") as stream:
     checksum = hashlib.file_digest(stream, "sha256").hexdigest()
 output.with_suffix(".zip.sha256").write_text(checksum + "  " + output.name + "\n")

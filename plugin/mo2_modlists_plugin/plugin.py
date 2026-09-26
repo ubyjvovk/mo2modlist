@@ -115,6 +115,9 @@ class ModlistsTool(mobase.IPluginTool):
         layout.addWidget(collection)
         install.clicked.connect(lambda: self.importer.open_manifest(dialog, root, game))
         collection.clicked.connect(lambda: self.importer.open_collection(dialog, root, game))
+        providers = QPushButton("Optional provider credentials…")
+        layout.addWidget(providers)
+        providers.clicked.connect(lambda: self.importer.configure_provider(dialog))
         dialog.exec()
 
     def run_job(self, parent, function, done):

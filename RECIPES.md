@@ -2,6 +2,8 @@
 
 A recipe is metadata for one exact source artifact. It never executes code. The importer currently needs an explicit recipe or matching registry entry when native dependency metadata is unavailable. An empty `dependencies` object is the recipe author's assertion that there are no required mod dependencies; missing metadata is not equivalent to that assertion.
 
+With a stored Nexus API key, the experimental v3 file adapter can generate metadata for a file with declared native requirements. It preserves raw range definitions, obtains materialized candidates from Nexus and converts a selected candidate to an exact manifest source. Empty new-style requirements still need a recipe because the current GET schema does not expose the legacy-requirements mode. Local installation recipes do not silently remove available native required edges. The CP77 adapter maps verified Nexus DLC IDs 1/2 to Phantom Liberty/REDmod. Candidate backtracking remains future work; multiple native candidates currently request an explicit choice.
+
 ```json
 {
   "schemaVersion": 1,

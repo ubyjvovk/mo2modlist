@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 import zipfile
 
@@ -171,6 +172,32 @@ import_lock(root / "modlist.json", root / "modlist.lock.json", ArtifactStore(roo
         with self.assertRaisesRegex(PackError, "also have to be a directory"):
             self.resolve({"mod": dep})
         self.assertFalse(self.lock.exists())
+
+    def test_native_nexus_metadata_expands_into_recipe_backed_transitive_source(self):
+        self.dependency("base", {"r6/scripts/base.reds": b"base"})
+        self.dependency("feature", {"r6/scripts/feature.reds": b"feature"})
+        feature_source = {"type": "nexus", "game": "cyberpunk2077", "modId": 1, "fileId": 2}
+        base_source = {"type": "nexus", "game": "cyberpunk2077", "modId": 3, "fileId": 4}
+        metadata = {"source": feature_source, "complete": True,
+            "version": {"file": {"id": "feature-lineage"}, "version": "1"},
+            "raw": {"dlc_dependency_definitions": []},
+            "materialized": {"dependencies": [{"id": "base", "candidate_mod_files": [{"id": "base-lineage",
+                "mod": {"game_scoped_id": "3", "game": {"domain_name": "cyberpunk2077"}},
+                "candidate_versions": [{"id": "v-base", "name": "Base", "category": "main", "game_scoped_id": "4", "version": "1", "position": "1"}]}]}]}}
+        self.store.nexus_fetch = lambda source: self.root / ("feature.zip" if source["fileId"] == 2 else "base.zip")
+        self.store.nexus_metadata = SimpleNamespace(exact_source=lambda source, ask: source,
+            metadata=lambda source: metadata if source == feature_source else {"source": base_source, "complete": False})
+        document = {"schemaVersion": 1, "name": "Native", "game": {"id": "cyberpunk2077", "dlc": []},
+            "dependencies": {"feature": {"source": feature_source}}}
+        self.manifest.write_text(json.dumps(document))
+        lock = resolve_manifest(self.manifest, self.store, self.game, self.lock,
+            ask=lambda request: (self.root / "base.recipe.json").as_posix())
+        self.assertEqual(len(lock["packages"]), 2)
+        feature = lock["packages"][lock["aliases"]["feature"]]
+        self.assertEqual(feature["artifact"]["integrityKind"], "locally-observed")
+        self.assertEqual(feature["metadataProvenance"]["kind"], "nexus-v3-file-requirements")
+        self.assertEqual(feature["nativeMetadata"], metadata)
+        import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "Native")
 
     def test_conflicting_components_show_both_reason_chains(self):
         left = self.dependency("left", {"r6/scripts/a.reds": b"a"}, component="shared")

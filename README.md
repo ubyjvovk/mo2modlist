@@ -57,7 +57,9 @@ Source export is implemented and tested in MO2 2.5.2, including Local archive, U
 
 The source importer has passed a tiny real-MO2 test: source JSON plus recipe/archive -> inspected lock -> fresh profile, then a second profile from the lock/cache after removing the original recipe/archive. Dependency choice UI ran on the Qt owning thread. Existing profile contents were preserved. Core tests cover transitive dependencies, selected alternatives/variants, conflicts, rollback/retry, cache-only installs, registry commit/hash verification and Collection conversion.
 
-**The full specification is not complete.** Native Nexus dependency normalization, candidate/range solving, complete Collection instruction handoffs, authenticated Collection downloading, broader crash recovery and the real mixed-source game smoke test remain. The historical snapshot game's successful launch does not verify the new source importer.
+**The full specification is not complete.** Automatic candidate/range solving, complete Collection instruction handoffs, live authenticated provider validation, broader crash recovery and the real mixed-source game smoke test remain. The historical snapshot game's successful launch does not verify the new source importer.
+
+Optional **Provider credentials…** stores a Nexus API key or GitHub token in Windows Credential Manager. A Nexus key enables the isolated v3 metadata adapter and Collection package requests. It enumerates file lineages and versions, retains raw and materialized dependency definitions, and pins selected candidates; multiple candidates currently require an explicit choice. Empty new-style requirements remain unknown because the current GET schema does not identify whether legacy page requirements apply. Optional GitHub authentication applies to release metadata requests. No credential is exported or read from MO2's private credential storage.
 
 The manifest schema is [modlist.schema.json](mo2_modlists/modlist.schema.json). Recipe/registry and Collection details are in [RECIPES.md](RECIPES.md). The current acceptance tracker is at the top of [PROGRESS.md](PROGRESS.md).
 

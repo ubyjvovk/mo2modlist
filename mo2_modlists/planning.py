@@ -46,6 +46,14 @@ def validate_recipe(recipe):
                 if set(values) != set(options[key]["choices"]):
                     raise PackError("Every alternative option choice must have a dependency")
                 validate_manifest({"schemaVersion": 1, "name": "alternatives", "game": {"id": "cyberpunk2077", "dlc": []}, "dependencies": values})
+            else:
+                for contribution in values.values():
+                    fields(contribution, (), ("mappings", "dependencies", "conflicts"), "variant contribution")
+                    if "mappings" in contribution and not isinstance(contribution["mappings"], list):
+                        raise PackError("Variant mappings must be an array")
+                    if "conflicts" in contribution and (not isinstance(contribution["conflicts"], list) or any(not isinstance(c, str) or not c for c in contribution["conflicts"])):
+                        raise PackError("Variant conflicts must be component names")
+                    validate_manifest({"schemaVersion": 1, "name": "variant", "game": {"id": "cyberpunk2077", "dlc": []}, "dependencies": contribution.get("dependencies", {})})
     return recipe
 
 
@@ -250,8 +258,11 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
     observed_version = product_version(game / "bin/x64/Cyberpunk2077.exe")
     if observed_version:
         identity["version"] = observed_version
+    identity["redmod"] = (game / "tools/redmod/bin/redMod.exe").is_file()
+    def has_dlc(dlc):
+        return identity["phantomLiberty"] if dlc == "phantom-liberty" else identity["redmod"] if dlc == "redmod" else False
     for dlc in document["game"]["dlc"]:
-        if dlc != "phantom-liberty" or not identity["phantomLiberty"]:
+        if not has_dlc(dlc):
             raise PackError(f"Required DLC is unavailable: {dlc}")
     if document["game"].get("version"):
         version = observed_version
@@ -259,10 +270,39 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
             raise PackError(f"Game version differs: required {document['game']['version']}, found {version}")
         identity["version"] = version
     packages, components, aliases, edges, active = {}, {}, {}, [], {}
+    native_sources = {}
+
+    def source_identity(source, declaring):
+        source = dict(source)
+        if source["type"] == "local-archive":
+            source["path"] = reference_path(source["path"], declaring).as_posix()
+        return json_digest(source)
 
     def visit(dependency, declaring, chain):
         progress("Resolving " + " -> ".join(chain))
-        supplement = None
+        supplement, native, acquired = None, None, None
+        initial_source = source_identity(dependency["source"], declaring)
+        if "recipe" not in dependency and not dependency.get("options") and initial_source in native_sources:
+            previous_key = native_sources[initial_source]
+            expected = dependency.get("integrity")
+            if expected and expected.lower() != "sha256:" + packages[previous_key]["artifact"]["sha256"]:
+                raise PackError("Different integrity constraints for the same source: " + " -> ".join(chain))
+            return previous_key
+        if dependency["source"]["type"] == "nexus" and store.nexus_metadata is not None:
+            exact = store.nexus_metadata.exact_source(dependency["source"], ask)
+            dependency = {**dependency, "source": exact}
+            native = store.nexus_metadata.metadata(exact)
+        if "recipe" not in dependency and native and native["complete"]:
+            from .nexus import recipe_from_metadata
+            acquired = store.acquire(dependency, declaring)
+            native_recipe = recipe_from_metadata(native, acquired["sha256"], ask=ask)
+            recipe_path = store.root / "native-recipes" / (json_digest(native_recipe) + ".json")
+            if recipe_path.exists():
+                if json.loads(recipe_path.read_text(encoding="utf-8")) != native_recipe:
+                    raise PackError("Cached native recipe was modified")
+            else:
+                write_json(recipe_path, native_recipe)
+            dependency = {**dependency, "recipe": recipe_path.as_posix()}
         if "recipe" not in dependency:
             supplement = registry_recipe(dependency["source"], registry_entries, ask)
             if supplement:
@@ -278,12 +318,22 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
         recipe_path = reference_path(dependency["recipe"], declaring)
         recipe = load_recipe(recipe_path)
         selected, options = selected_recipe(recipe, dependency.get("options", {}), ask)
+        if native and native["complete"] and acquired is None:
+            from .nexus import recipe_from_metadata
+            # Preserve native requirements alongside local installation recipes.
+            # Supplemental metadata cannot silently delete provider constraints.
+            native_requirements = recipe_from_metadata(native, recipe["artifact"].removeprefix("sha256:"), ask=ask)
+            for alias, required in native_requirements["dependencies"].items():
+                selected["dependencies"]["native-" + alias] = required
+            for dlc in native_requirements.get("game", {}).get("dlc", []):
+                if not has_dlc(dlc):
+                    raise PackError("Required native DLC is unavailable: " + dlc + "; " + " -> ".join(chain))
         if "game" in selected:
             constraint_game = selected["game"]
             validate_manifest({"schemaVersion": 1, "name": "recipe game", "game": constraint_game, "dependencies": {}})
             if constraint_game.get("version") and constraint_game["version"] != observed_version:
                 raise PackError("Recipe game version constraint failed: " + " -> ".join(chain))
-            if any(dlc != "phantom-liberty" or not identity["phantomLiberty"] for dlc in constraint_game["dlc"]):
+            if any(not has_dlc(dlc) for dlc in constraint_game["dlc"]):
                 raise PackError("Recipe DLC constraint failed: " + " -> ".join(chain))
         dependency = {**dependency, "integrity": recipe["artifact"]} if "integrity" not in dependency else dependency
         if dependency["integrity"].lower() != recipe["artifact"]:
@@ -294,8 +344,10 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
             previous, previous_chain, key = components[component]
             if constraint != previous:
                 raise PackError(f"Conflicting component {component}: {' -> '.join(previous_chain)} versus {' -> '.join(chain)}")
+            if dependency["source"] not in packages[key]["sourceReferences"]:
+                packages[key]["sourceReferences"].append(dependency["source"])
             return key
-        artifact = store.acquire(dependency, declaring)
+        artifact = acquired or store.acquire(dependency, declaring)
         key = json_digest({"component": component, "constraint": constraint})
         components[component] = (constraint, chain, key)
         packages[key] = {"component": component, "version": recipe["version"], "artifact": artifact,
@@ -303,8 +355,11 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
                                     "bytesBase64": base64.b64encode(recipe_path.read_bytes()).decode("ascii")}, "options": options,
                          "selectedAlternatives": {name: options[name] for name in recipe.get("alternatives", {})},
                          "sourceDocument": str(declaring.resolve()), "reason": chain,
-                         "metadataProvenance": {"kind": "registry", "registry": supplement["registry"], "commit": supplement["commit"], "reason": supplement["reason"]} if supplement else {"kind": "explicit-local-recipe"},
+                         "sourceReferences": [dependency["source"]],
+                         "nativeMetadata": native,
+                         "metadataProvenance": {"kind": "registry", "registry": supplement["registry"], "commit": supplement["commit"], "reason": supplement["reason"]} if supplement else {"kind": "nexus-v3-file-requirements" if acquired else "explicit-local-recipe"},
                          "outputs": outputs_for(store.path(artifact["sha256"]), selected.get("mappings"), progress)}
+        native_sources[source_identity(artifact["source"], declaring)] = key
         for alias, required in sorted(selected["dependencies"].items()):
             required_key = visit(required, recipe_path, chain + [alias])
             edges.append({"from": key, "to": required_key, "alias": alias})

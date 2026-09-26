@@ -105,6 +105,8 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
     if "/" in safe_relative(profile_name):
         raise PackError("Choose one profile name")
     identity = game_identity(game)
+    if "redmod" in lock["game"]:
+        identity["redmod"] = (game / "tools/redmod/bin/redMod.exe").is_file()
     if "version" in lock["game"]:
         from .windows_version import product_version
         identity["version"] = product_version(game / "bin/x64/Cyberpunk2077.exe")
