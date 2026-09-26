@@ -39,7 +39,7 @@ Packaged the extension as `artifacts/MO2-Modlists-0.1.0.zip`, with a SHA-256 sid
 
 ## Next work
 
-1. Finish gameplay acceptance (save loading and movement); preview packaging is complete.
+1. Profile round-trip gameplay acceptance is complete; see the final smoke check below. Broader source-manifest work remains separate.
 2. Broaden profile/layout/settings support and add strict JSON schemas, import locking and hard-crash recovery.
 3. Validate a live Nexus download through MO2 and broaden automatic GitHub provenance discovery. Source-backed exports, archive member recipes and cache reuse are implemented below.
 4. Add native dependency metadata normalization and the shared resolver, using supplemental recipes only where necessary.
@@ -53,6 +53,19 @@ Packaged the extension as `artifacts/MO2-Modlists-0.1.0.zip`, with a SHA-256 sid
 - UI export now attempts compaction using source archives; UI import hydrates missing content before deployment. Optional settings provide additional archive directories/GitHub source catalog. CLI `compact`, `hydrate` and automatic import hydration expose the same pipeline.
 - Fourteen tests pass. New tests cover selected variant reconstruction, retained local changes, changed archives, unsafe members, Nexus acquisition hash verification and the source-export wrapper's temporary snapshot cleanup.
 - Imported the reconstructed real bundle into `Source-backed - Roundtrip`. The first attempt correctly rejected runtime-generated conflicting overwrite from the earlier game launch. Preserved that disposable instance's overwrite as `overwrite-before-source-roundtrip`, created an empty overwrite and retried successfully.
-- Verified all 429 managed files across 17 layers in that source-backed import, with zero mismatches and matching priority (`artifacts/source-roundtrip-verification.json`). Version 0.2.0 is deployed only in the disposable MO2 instance and packaged as `artifacts/MO2-Modlists-0.2.0.zip` (SHA-256 `6d519507023d8b65076b278b5e50ffbc8c4bf95ff427fd08d83a67e05068a1bf`).
+- Verified all 429 managed files across 17 layers in that source-backed import, with zero mismatches and matching priority (`artifacts/source-roundtrip-verification.json`). Version 0.2.0 is deployed only in the disposable MO2 instance and packaged as `artifacts/MO2-Modlists-0.2.0.zip` (SHA-256 `895be4dbd31f08bb8ade40aab7bde4c42354f20990e633fa06dbf402b3add21e`).
 - Root/overwrite inventories contain some save copies left by the existing setup under game/mod directories. Standard user save folders are not collected, but this generic snapshot includes those nested copies. Bundles must be treated as private; automatic classification of such leftovers remains future work.
-- Save loading/movement acceptance remains pending. The source-backed pipeline does not imply the broader dependency resolver is complete.
+- The source-backed pipeline does not imply the broader dependency resolver is complete.
+
+## Final gameplay smoke check
+
+On 2026-09-26, launched `Source-backed - Roundtrip` through the disposable MO2 instance against `C:/Users/d/Documents/MO2-Modlists-Test-Game`. This is the profile reconstructed from eight freshly downloaded GitHub archives, seven cached Nexus archives and retained local blobs.
+
+- The game reached the Cyberpunk 2.31 / Phantom Liberty menu, then loaded the local Continue save (`QuickSave-9`, Gig: Monster Hunt).
+- Keyboard control worked on this fresh launch. Verified a rendered in-world HUD and scene, crouch-to-standing camera/stance change, and a jump with visible vertical camera movement. The character and world continued updating without a crash during the smoke check.
+- Private screenshots: `artifacts/source-gameplay-before.png`, `source-gameplay-crouch.png`, `source-gameplay-jump.png`. These prove a loaded, responsive game rather than just successful startup. Forward taps were too short to establish sustained walking; no extended playtest is claimed.
+- Redscript's current log reports successful compilation. ArchiveXL logged in-world resource patching during save load.
+- Closed the test game with Alt+F4. Rechecked that its process and the temporary launch MO2 had exited. The latest REDEngine report remains dated September 22; this test produced no new report.
+- Source Play modlist SHA-256 still matches the recorded original. Development deployment and imports targeted only the disposable instance and separate game folder.
+
+The requested **profile -> modlist -> new profile, playable immediately** milestone is verified on this machine. This does not establish support for every MO2/game distribution, replace a long gameplay compatibility test, or complete the broader dependency-resolver stages in SPEC.md. Live authenticated Nexus acquisition remains an integration check for the next stage; this round trip used verified cached Nexus archives.

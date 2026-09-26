@@ -1,8 +1,9 @@
 """Private local bundles reproduce installed outputs, including installer choices.
 
-No source credentials, full ModOrganizer.ini, saves or vanilla game archives are
-published. Export is a lock operation over an existing installation, not a new
-dependency solve. Bundles are intended for personal backup/transfer.
+Source credentials and the full ModOrganizer.ini are not collected. Files nested
+inside captured directories may include personal data or save copies. Export is
+a lock operation over an existing installation, not a new dependency solve.
+Bundles are intended for private personal backup/transfer.
 """
 
 from __future__ import annotations

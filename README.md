@@ -2,6 +2,8 @@
 
 Python MO2 extension and independent core for a profile -> modlist -> new profile round trip.
 
+Validated locally with MO2 2.5.2 and GOG Cyberpunk 2.31: a reconstructed profile loaded an existing save and responded to player controls in a separate game directory. See PROGRESS.md for evidence and limits.
+
 ## Working vertical slice
 
 - Export enabled mods in priority order, including the actual installed FOMOD selections.
