@@ -58,7 +58,7 @@ class ModlistsTool(mobase.IPluginTool):
         return "Export source manifests; resolve and install pinned modlists and review Nexus Collections."
 
     def version(self):
-        return mobase.VersionInfo(0, 5, 1)
+        return mobase.VersionInfo(0, 5, 2)
 
     def settings(self):
         return [mobase.PluginSetting("archive-directories", "Additional download directories, separated by semicolons", ""),

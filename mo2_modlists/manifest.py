@@ -169,6 +169,12 @@ def profile_sources(mo2: Path, profile: str, archive_dirs=(), github_catalog=Non
                     hint = Path(provenance["sourceDocument"]).parent / hint
                 source["path"] = hint.resolve().as_posix()
             dependency = {"source": source, "integrity": "sha256:" + artifact["sha256"]}
+            recipe_reference = provenance.get("recipeReference")
+            if recipe_reference:
+                recipe_path = Path(recipe_reference)
+                if (recipe_path.is_absolute() and recipe_path.is_file()
+                    and digest(recipe_path) == provenance["recipe"]["sha256"]):
+                    dependency["recipe"] = recipe_path.resolve().as_posix()
             if provenance.get("options"):
                 dependency["options"] = provenance["options"]
             result.append({"name": name, "dependency": dependency})

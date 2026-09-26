@@ -1,5 +1,16 @@
 # Progress: 2026-09-26
 
+## 0.5.2 real mixed-source installation and manual Nexus handoff
+
+- Previous turn was progress (`c0b8aa0`). Added the missing direct manual Nexus archive handoff when the manager cannot start/complete a download or the core has no online downloader. It presents the exact source, retains Nexus identity and enforces provided/locked hashes. Regression coverage verifies manual input, locally-observed status and rejection of a changed locked archive.
+- Imported-profile re-export now retains an existing unchanged recipe reference, checked against the recorded digest. Recipe locations are advisory local references, not embedded blobs; changed/missing metadata still needs replacement during resolution. A regression test proves profile -> one exported JSON -> recipe-backed fresh profile with a custom mapping and no metadata prompt.
+- 62 tests pass. The new UI fallback still needs a dedicated host-flow check; the earlier MO2 source/Collection tests remain valid for their covered paths.
+- Created `tools/prepare_mixed_source_smoke.py` and generated `artifacts/mixed-source-smoke1`: local observer mod -> CET and redscript GitHub artifacts + Nexus Codeware -> GitHub RED4ext. Five components, four transitive edges, three source types. Recipes were reviewed against the authors' official READMEs.
+- Nexus Codeware 1.20.5 was identified as mod 7780/file 161780 in the signed-in browser. Its published VirusTotal link contains SHA-256 `102989e199bad650fe6e53395c22bac53fdd7abecc6eeec3b0046886631591f0`, exactly matching the existing official GitHub archive. That verified archive was supplied through the manual callback; no Nexus credentials or expiring URLs were exported. A new browser download was blocked by Brave; the block was not bypassed. No further Codeware download is needed for this pack.
+- Resolved real GitHub release/asset identities and downloaded their exact archives. Installed the finalized lock into disposable profile `Mixed Source First`; `verification.json` reports all 37 managed files correct, zero differences. Physical root deployment includes 33 files; remaining files use MO2 overlay.
+- Launched through MO2's documented `run -e` CLI. RED4ext initialized, Codeware 1.20.5 loaded and script compilation succeeded. CET reached its first-run hotkey dialog; configured only the previously used overlay key in the disposable runtime settings and relaunched. The game then reached CD Projekt RED's user-agreement screen. Requested the user's decision rather than accepting the agreement automatically. Game PID 23924 was live when recorded; recheck before any control.
+- Screenshots and runtime status are under `artifacts/mixed-source-smoke1`. Gameplay and a second locked-profile game launch are **not yet verified**. This real five-component pack advances the acceptance test but does not prove arbitrary Collections or all Play mods compatible. Live authenticated metadata/Collection requests still need the requested credential/package.
+
 ## 0.5.1 reviewed game-root restoration
 
 - The previous goal turn made progress in commit `3ee9b3f`. This continuation added the missing post-install root-restoration workflow in MO2 and CLI. New journals record their exact game target and profile. Older journals without those fields require manual recovery rather than guessing ownership.

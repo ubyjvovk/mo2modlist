@@ -48,10 +48,15 @@ class ImportController(QObject):
                 manager = self.tool.organizer.downloadManager()
                 download_id = manager.startDownloadNexusFileForGame(source["game"], source["modId"], source["fileId"])
                 if download_id < 0:
-                    raise PackError("MO2 could not start this Nexus download. Connect Nexus in MO2 or supply the exact archive in Downloads.")
+                    pending["answer"] = self.choose_nexus_archive(parent, source,
+                        "MO2 could not start this download. You can supply the exact archive downloaded through Nexus's supported website flow.")
+                    pending["event"].set()
+                    return
                 self.pending[download_id] = pending
                 return
-            if kind == "local-archive":
+            if kind == "nexus-archive":
+                answer = self.choose_nexus_archive(parent, request["source"], request["message"])
+            elif kind == "local-archive":
                 filename, _ = QFileDialog.getOpenFileName(parent, request["message"], "", "Archives (*.zip *.7z)")
                 if not filename:
                     raise PackError("Archive selection cancelled")
@@ -90,8 +95,28 @@ class ImportController(QObject):
     def download_failed(self, download_id):
         pending = self.pending.pop(download_id, None)
         if pending is not None:
-            pending["error"] = "Nexus download failed. Check MO2 Downloads and retry; no profile was activated."
+            if pending.get("cancelled"):
+                pending["event"].set()
+                return
+            try:
+                pending["answer"] = self.choose_nexus_archive(self.tool.parent, pending["request"]["source"],
+                    "The MO2 download failed. Supply the exact archive if you downloaded it manually, or cancel to retry later.")
+            except Exception as exc:
+                pending["error"] = str(exc)
             pending["event"].set()
+
+    def choose_nexus_archive(self, parent, source, message):
+        url = f"https://www.nexusmods.com/{source['game']}/mods/{source['modId']}?tab=files&file_id={source['fileId']}"
+        question = QMessageBox(QMessageBox.Icon.Question, "Nexus manual download",
+            message + "\n\nExact source:\n" + url + "\n\nSelect its downloaded archive? Any pinned hash will be verified.",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, parent)
+        question.setTextFormat(Qt.TextFormat.PlainText)
+        if question.exec() != QMessageBox.StandardButton.Ok:
+            raise PackError("Nexus manual download cancelled; the plan remains incomplete")
+        filename, _ = QFileDialog.getOpenFileName(parent, "Exact downloaded Nexus archive", "", "Archives (*.zip *.7z)")
+        if not filename:
+            raise PackError("Nexus archive selection cancelled; the plan remains incomplete")
+        return filename
 
     def store(self, root, archives, report):
         from .mo2_modlists.credentials import headers

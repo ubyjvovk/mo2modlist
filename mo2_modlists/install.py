@@ -334,7 +334,8 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                         os.replace(temporary, target)
                 write_json(safe_join(mo2, ".modlists/installed/" + name + ".json"),
                     {"artifact": artifact, "component": package["component"], "options": package["options"],
-                     "sourceDocument": package["sourceDocument"], "recipe": package["recipe"]})
+                     "sourceDocument": package["sourceDocument"], "recipe": package["recipe"],
+                     "recipeReference": package.get("recipeReference")})
                 (destination / "meta.ini").write_text("[General]\nnotes=Installed from a pinned source manifest\n", encoding="utf-8")
                 failure_hook("mod-staged")
             journal["status"] = "deploying"

@@ -183,8 +183,12 @@ class ArtifactStore:
             path = self.local_nexus(source)
             if path is None:
                 if self.offline or self.nexus_fetch is None:
-                    raise InputRequired("nexus-download", "Supply the exact Nexus archive or download it through MO2", source=source, expectedSha256=expected)
-                path = Path(self.nexus_fetch(source))
+                    request = InputRequired("nexus-archive", "Supply the exact downloaded Nexus archive", source=source, expectedSha256=expected)
+                    if self.manual_fetch is None:
+                        raise request
+                    path = Path(self.manual_fetch(request.request))
+                else:
+                    path = Path(self.nexus_fetch(source))
             result = self.store(path, source, expected)
         else:
             if self.offline:

@@ -22,6 +22,8 @@ Additional archive directories and a GitHub source catalog can be configured in 
 
 Export includes enabled source dependencies and explicit file-conflict winners derived from the current profile. It does not copy local configuration edits, overwrite contents, root-only additions or saves. Unrecorded FOMOD choices need explicit recipes/options. A local archive path is portable only when that archive remains available or is supplied separately.
 
+Re-exporting a profile installed by this extension retains its original recipe reference when that file still exists and matches the recorded recipe hash. It remains a local reference, just like a local archive, and must be accessible on the importing machine. Changed/missing recipes are not silently reused; resolution will need replacement metadata. Export still writes only `modlist.json`.
+
 ## Install in MO2
 
 Choose **Install modlist.json or lock…**, select the source manifest, and name a new profile. Resolution acquires exact artifacts and expands declared recipe dependencies. Unknown dependency metadata prompts for a recipe; see [RECIPES.md](RECIPES.md). Git registries can supply supplemental recipes from a pinned commit. Required options, dependency alternatives and unresolved file winners are recorded before finalization.
@@ -33,6 +35,8 @@ Retry the same manifest/lock and profile name after an interrupted operation. Ve
 **Restore imported game-root files…** reviews the physical changes owned by an installation, restores verified backups and removes files that installation added. Mod/profile folders remain, but the selected profile will no longer have those root files. Changed files, damaged backups and other imported profiles requiring the same paths block restoration. Interrupted restoration can be reviewed and resumed. This tracks consumers within this MO2 instance; other instances and unmanaged consumers are not detectable. Older journals without recorded game/profile targets require manual recovery from their backups.
 
 **Import Nexus Collection…** accepts a full downloaded package, saved review draft or Collection URL. Optional entries and supported ordering/dependency rules are retained; embedded archives are extracted and verified. Unhandled installer choices/patches can be supplied as a prepared archive plus recipe with an explicit handoff record. Other unresolved instructions produce a review draft, not a completed pack. Collection-level external steps require acknowledgement for each installation target. URL downloads use the optional stored Nexus API key when required; the downloaded-package route is also available. MO2's supported download manager handles individual Nexus mod archives.
+
+If MO2 cannot start or complete a Nexus download, the importer offers an explicit manual-archive handoff showing the exact mod/file URL. The artifact keeps its Nexus identity; provided and locked hashes are still mandatory. A first download without a supplied digest remains labelled locally observed.
 
 ## CLI
 

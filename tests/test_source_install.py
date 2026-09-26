@@ -69,6 +69,26 @@ class SourceInstallTests(unittest.TestCase):
         repeated = import_lock(self.manifest, self.lock, offline, self.mo2, self.game, "Offline", allow_root=True)
         self.assertEqual(len(repeated["mods"]), 2)
 
+    def test_manual_nexus_archive_keeps_source_and_verifies_locked_hash(self):
+        dep = self.dependency("manual", {"r6/scripts/manual.reds": b"script"})
+        archive = self.root / "manual.zip"
+        source = {"type": "nexus", "game": "cyberpunk2077", "modId": 123, "fileId": 456}
+        requests = []
+        def choose(request):
+            requests.append(request)
+            return str(archive)
+        store = ArtifactStore(self.root / "manual-cache", offline=True, manual_fetch=choose)
+        record = store.acquire({"source": source}, self.manifest)
+        self.assertEqual(record["source"], source)
+        self.assertEqual(record["integrityKind"], "locally-observed")
+        self.assertEqual(requests[0]["kind"], "nexus-archive")
+        self.assertEqual(requests[0]["source"], source)
+        archive.write_bytes(b"wrong downloaded file")
+        other_store = ArtifactStore(self.root / "empty-cache", offline=True, manual_fetch=choose)
+        with self.assertRaisesRegex(PackError, "pinned SHA-256"):
+            other_store.acquire({"source": source}, self.manifest, locked=record)
+        self.assertEqual(requests[-1]["expectedSha256"], record["sha256"])
+
     def test_failure_restores_root_and_retry_reuses_disabled_stage(self):
         dependency = self.dependency("mod", {"bin/x64/loader.dll": b"new", "r6/scripts/test.reds": b"script"})
         self.resolve({"mod": dependency})
@@ -171,6 +191,23 @@ class SourceInstallTests(unittest.TestCase):
         sources = profile_sources(self.mo2, "New")
         self.assertEqual(sources[0]["dependency"]["source"]["path"], (self.root / "mod.zip").as_posix())
         self.assertEqual(sources[0]["dependency"]["integrity"], "sha256:" + digest(self.root / "mod.zip"))
+        self.assertEqual(sources[0]["dependency"]["recipe"], (self.root / "mod.recipe.json").as_posix())
+
+    def test_profile_export_keeps_verified_recipe_for_fresh_import(self):
+        from mo2_modlists.manifest import profile_sources, export_manifest
+        dep = self.dependency("mod", {"wrapped/a.reds": b"a"}, mappings=[{"from": "wrapped", "to": "r6/scripts", "class": "mo2-overlay"}])
+        self.resolve({"mod": dep})
+        import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "First")
+        entries = profile_sources(self.mo2, "First")
+        exported = self.root / "exported/modlist.json"
+        export_manifest(self.mo2, self.game, "First", exported, {e["name"]: e["dependency"] for e in entries})
+        self.assertEqual([p.name for p in exported.parent.iterdir()], ["modlist.json"])
+        new_lock = self.root / "exported.lock.json"
+        resolve_manifest(exported, self.store, self.game, new_lock, ask=lambda request: self.fail("Lost recipe metadata"))
+        result = import_lock(exported, new_lock, self.store, self.mo2, self.game, "Second")
+        self.assertEqual((self.mo2 / "mods" / result["mods"][0] / "r6/scripts/a.reds").read_bytes(), b"a")
+        (self.root / "mod.recipe.json").write_text('{"changed": true}')
+        self.assertNotIn("recipe", profile_sources(self.mo2, "First")[0]["dependency"])
 
     def test_tampered_recipe_bytes_and_reserved_output_fail_before_deployment(self):
         dep = self.dependency("mod", {"r6/scripts/a.reds": b"a"})
