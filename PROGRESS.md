@@ -1,5 +1,13 @@
 # Progress: 2026-09-26
 
+## 0.5.3 native requirements retained during locked installation
+
+- Audited the spec against the source importer. Fixed lock validation for native Nexus requirements used alongside an explicit installation recipe: missing or redirected required edges, mismatched source snapshots, and unsatisfied native DLC constraints now fail before deployment. Validation uses the locked metadata and selected candidates without refreshing the provider.
+- All 62 unittest tests pass, including added negative subcases in the native-provider integration test. Pytest is not installed in the development environment; the suite uses unittest.
+- Corrected the stale core version string and packaged 0.5.3. The running test instance has not been hot-reloaded or changed while its game is open.
+- Added ACCEPTANCE.md to distinguish implemented behavior, fixture/host evidence, and remaining live gates. The game remains at its agreement screen; no agreement was accepted on the user's behalf. Optional Nexus credentials remain unconfigured. Stable Play and the stable game remain untouched.
+
+
 ## 0.5.2 real mixed-source installation and manual Nexus handoff
 
 - Previous turn was progress (`c0b8aa0`). Added the missing direct manual Nexus archive handoff when the manager cannot start/complete a download or the core has no online downloader. It presents the exact source, retains Nexus identity and enforces provided/locked hashes. Regression coverage verifies manual input, locally-observed status and rejection of a changed locked archive.

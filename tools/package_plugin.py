@@ -15,7 +15,7 @@ with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
                 archive.write(file, prefix + "/" + file.relative_to(source).as_posix())
     readme = (root / "README.md").read_text(encoding="utf-8").replace("(mo2_modlists/", "(plugins/mo2_modlists_plugin/mo2_modlists/")
     archive.writestr("MO2-Modlists-README.md", readme)
-    for name in ("SPEC.md", "RECIPES.md", "PROGRESS.md"):
+    for name in ("SPEC.md", "RECIPES.md", "PROGRESS.md", "ACCEPTANCE.md"):
         archive.write(root / name, name)
 with output.open("rb") as stream:
     checksum = hashlib.file_digest(stream, "sha256").hexdigest()

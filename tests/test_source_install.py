@@ -303,6 +303,30 @@ import_lock(root / "modlist.json", root / "modlist.lock.json", ArtifactStore(roo
         self.assertEqual(lock["candidateResolution"]["components"]["nexus:cyberpunk2077:lineage:base-lineage"], base_source)
         import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "Native")
 
+        # A local layout recipe must not erase the provider's requirements.
+        self.lock.unlink()
+        document["dependencies"]["feature"]["recipe"] = "feature.recipe.json"
+        self.manifest.write_text(json.dumps(document))
+        lock = resolve_manifest(self.manifest, self.store, self.game, self.lock)
+        from copy import deepcopy
+        from mo2_modlists.install import validate_lock
+        validate_lock(lock, document)
+        for mode in ("omitted", "redirected", "wrong-source", "missing-dlc"):
+            with self.subTest(native_lock=mode):
+                changed = deepcopy(lock)
+                feature = changed["packages"][changed["aliases"]["feature"]]
+                if mode == "omitted":
+                    changed["dependencyEdges"] = []
+                elif mode == "redirected":
+                    changed["dependencyEdges"][0]["to"] = changed["aliases"]["feature"]
+                elif mode == "wrong-source":
+                    feature["nativeMetadata"]["source"] = base_source
+                else:
+                    feature["nativeMetadata"]["raw"]["dlc_dependency_definitions"] = [
+                        {"dlc_targets": [{"dlc_id": "1"}]}]
+                with self.assertRaisesRegex(PackError, "native dependency|different locked source|native DLC"):
+                    validate_lock(changed, document)
+
     def test_collection_external_steps_require_fresh_target_acknowledgement(self):
         dep = self.dependency("mod", {"r6/scripts/a.reds": b"a"})
         self.resolve({"mod": dep})

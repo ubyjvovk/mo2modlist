@@ -154,6 +154,29 @@ def _validate_lock(lock, manifest):
         selected, options = selected_recipe(recipe, package["options"])
         if options != package["options"]:
             raise PackError("Lock must record every selected recipe option")
+        native = package.get("nativeMetadata")
+        if native and native.get("complete"):
+            from .nexus import candidate_groups
+            if native["source"] != source:
+                raise PackError("Native metadata belongs to a different locked source")
+            prefix = "" if package["metadataProvenance"]["kind"] == "nexus-v3-file-requirements" else "native-"
+            selections = (lock.get("candidateResolution") or {}).get("selections", {}).get(json_digest(source), {})
+            for definition, candidates in candidate_groups(native):
+                alias = prefix + "nexus-definition-" + definition
+                required_edge = next((edge for edge in edges if edge["from"] == package_key
+                    and edge["alias"] == alias and edge.get("provenance") is None), None)
+                if required_edge is None:
+                    raise PackError("Lock omits required native dependency: " + alias)
+                target = packages[required_edge["to"]]
+                eligible = [candidate for _, _, candidate in candidates
+                    if definition not in selections or candidate == selections[definition]]
+                if not any(matches_dependency({"source": candidate}, target) for candidate in eligible):
+                    raise PackError("Locked edge does not satisfy its native dependency: " + alias)
+            installed_dlcs = {key for key, present in (("1", game["phantomLiberty"]),
+                ("2", game.get("redmod", False))) if present}
+            for definition in native["raw"]["dlc_dependency_definitions"]:
+                if not any(target["dlc_id"] in installed_dlcs for target in definition["dlc_targets"]):
+                    raise PackError("Locked game does not satisfy a native DLC requirement")
         for alias in selected["dependencies"]:
             if (package_key, alias, None) not in edge_keys:
                 raise PackError("Lock omits required recipe dependency: " + alias)
