@@ -11,7 +11,7 @@ with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
     for source, prefix in ((root / "plugin/mo2_modlists_plugin", "plugins/mo2_modlists_plugin"),
                            (root / "mo2_modlists", "plugins/mo2_modlists_plugin/mo2_modlists")):
         for file in sorted(source.rglob("*")):
-            if file.is_file() and (file.suffix == ".py" or file.name.endswith(".schema.json")) and "__pycache__" not in file.parts:
+            if file.is_file() and (file.suffix == ".py" or file.name.endswith(".schema.json") or ("_vendor" in file.parts and file.name in ("LICENSE", "README.md"))) and "__pycache__" not in file.parts:
                 archive.write(file, prefix + "/" + file.relative_to(source).as_posix())
     readme = (root / "README.md").read_text(encoding="utf-8").replace("(mo2_modlists/", "(plugins/mo2_modlists_plugin/mo2_modlists/")
     archive.writestr("MO2-Modlists-README.md", readme)

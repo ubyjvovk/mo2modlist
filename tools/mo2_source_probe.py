@@ -32,6 +32,14 @@ class Probe(mobase.IPlugin):
         try:
             from mo2_modlists_plugin.plugin import ModlistsTool
             from mo2_modlists_plugin.mo2_modlists.core import digest
+            from mo2_modlists_plugin.mo2_modlists.candidates import solve_nexus
+            from types import SimpleNamespace
+            solver_source = {"type": "nexus", "game": "cyberpunk2077", "modId": 1, "fileId": 2}
+            solver_metadata = {"source": solver_source, "complete": True, "version": {"file": {"id": "1"}, "position": "1"},
+                "materialized": {"dependencies": []}, "raw": {"dlc_dependency_definitions": []}}
+            solved = solve_nexus([(solver_source, ["host-fixture"])], SimpleNamespace(metadata=lambda source: solver_metadata))
+            assert len(solved["components"]) == 1
+            report["solverEngine"] = solved["engine"]
             tool = ModlistsTool()
             tool.init(self.organizer)
             tool.setParentWidget(parent)

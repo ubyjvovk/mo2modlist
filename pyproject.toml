@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mo2-modlists"
-version = "0.4.1"
+version = "0.5.0"
 description = "Source manifests for MO2 modlists"
 requires-python = ">=3.12"
 
@@ -15,4 +15,4 @@ mo2-modlists = "mo2_modlists.cli:main"
 include = ["mo2_modlists*"]
 
 [tool.setuptools.package-data]
-mo2_modlists = ["*.schema.json"]
+mo2_modlists = ["*.schema.json", "_vendor/README.md", "_vendor/resolvelib/LICENSE"]

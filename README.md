@@ -1,6 +1,6 @@
 # MO2 Modlists
 
-Version 0.4 development preview exports **one `modlist.json`**, following [SPEC.md](SPEC.md), and implements a separate source resolver/importer. Export does not include locks, blobs or copied archives. The old installed-snapshot importer remains removed. Locks and caches are produced during resolution/import.
+Version 0.5 development preview exports **one `modlist.json`**, following [SPEC.md](SPEC.md), and implements a separate source resolver/importer. Export does not include locks, blobs or copied archives. The old installed-snapshot importer remains removed. Locks and caches are produced during resolution/import.
 
 ## Export in MO2
 
@@ -61,9 +61,11 @@ Source export is implemented and tested in MO2 2.5.2, including Local archive, U
 
 The source importer has passed a tiny real-MO2 test: source JSON plus recipe/archive -> inspected lock -> fresh profile, then a second profile from the lock/cache after removing the original recipe/archive. Dependency choice UI ran on the Qt owning thread. Existing profile contents were preserved. Core tests cover transitive dependencies, selected alternatives/variants, conflicts, rollback/retry, cache-only installs, registry commit/hash verification and Collection conversion.
 
-**The full specification is not complete.** Automatic candidate/range solving, complete Collection instruction handoffs, live authenticated provider validation, broader crash recovery and the real mixed-source game smoke test remain. The historical snapshot game's successful launch does not verify the new source importer.
+Nexus native dependency domains are solved with vendored resolvelib 1.2.1. Shared constraints intersect and incompatible candidates backtrack, including alternatives across file lineages. Exact pack pins constrain the result. Candidate selection was exercised inside real MO2; fixture tests cover transitive incompatibilities, cycles, missing DLC and unsatisfiable reason chains.
 
-Optional **Provider credentials…** stores a Nexus API key or GitHub token in Windows Credential Manager. A Nexus key enables the isolated v3 metadata adapter and Collection package requests. It enumerates file lineages and versions, retains raw and materialized dependency definitions, and pins selected candidates; multiple candidates currently require an explicit choice. Empty new-style requirements remain unknown because the current GET schema does not identify whether legacy page requirements apply. Optional GitHub authentication applies to release metadata requests. No credential is exported or read from MO2's private credential storage.
+**The full specification is not complete.** Live authenticated provider and representative Collection validation, broader crash recovery and root restoration, fresh-instance prerequisites and the real mixed-source game smoke test remain. The historical snapshot game's successful launch does not verify the new source importer.
+
+Optional **Provider credentials…** stores a Nexus API key or GitHub token in Windows Credential Manager. A Nexus key enables the isolated v3 metadata adapter and Collection package requests. It enumerates file lineages and versions, retains raw and materialized dependency definitions, and locks the solver's selections. An ambiguous top-level mod page still requires an explicit file choice. Empty new-style requirements remain unknown because the current GET schema does not identify whether legacy page requirements apply. Optional GitHub authentication applies to release metadata requests. No credential is exported or read from MO2's private credential storage.
 
 The manifest schema is [modlist.schema.json](mo2_modlists/modlist.schema.json). Recipe/registry and Collection details are in [RECIPES.md](RECIPES.md). The current acceptance tracker is at the top of [PROGRESS.md](PROGRESS.md).
 

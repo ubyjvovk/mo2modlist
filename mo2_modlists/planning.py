@@ -248,6 +248,13 @@ def priority_for(packages, aliases, rules, ask=None, decisions=None, collection=
 
 def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *, progress=lambda text: None, ask=None):
     document = validate_manifest(json.loads(manifest_path.read_text(encoding="utf-8-sig")))
+    if ask is not None:
+        original_ask, answers = ask, {}
+        def ask(request):
+            key = json_digest(request)
+            if key not in answers:
+                answers[key] = original_ask(request)
+            return answers[key]
     from .registry import snapshot_registry, registry_recipe
     registry_snapshots, registry_entries = {}, []
     for name, definition in sorted(document.get("registries", {}).items()):
@@ -279,6 +286,58 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
             source["path"] = reference_path(source["path"], declaring).as_posix()
         return json_digest(source)
 
+    prepared_recipes, prepared_provenance, preparing = {}, {}, set()
+    native_solution = None
+    if store.nexus_metadata is not None:
+        from .candidates import solve_nexus
+        def collect(dependency, declaring, chain, metadata=None):
+            dependency = dict(dependency)
+            source = dependency["source"]
+            native = source["type"] == "nexus"
+            if native:
+                source = store.nexus_metadata.exact_source(source, ask)
+                dependency["source"] = source
+                metadata = metadata or store.nexus_metadata.metadata(source)
+            roots = [(source, chain)] if native else []
+            scope = json_digest({"dependency": dependency, "declaring": str(declaring.resolve())})
+            if scope in preparing:
+                return roots
+            preparing.add(scope)
+            source_key = source_identity(source, declaring)
+            if "recipe" not in dependency and source_key in prepared_recipes:
+                dependency.update(prepared_recipes[source_key])
+            if "recipe" not in dependency and (not native or not metadata["complete"]):
+                supplement = registry_recipe(source, registry_entries, ask)
+                if supplement:
+                    dependency["recipe"] = supplement["path"].as_posix()
+                    prepared_provenance[source_key] = supplement
+                else:
+                    request = InputRequired("dependency-metadata", "Required dependency metadata is unknown; provide a recipe with an explicit dependency list", source=source, chain=chain)
+                    if ask is None:
+                        raise request
+                    dependency["recipe"] = ask(request.request)
+            if "recipe" in dependency:
+                recipe_path = reference_path(dependency["recipe"], declaring)
+                recipe = load_recipe(recipe_path)
+                selected, options = selected_recipe(recipe, dependency.get("options", {}), ask)
+                prepared_recipes.setdefault(source_key, {"recipe": recipe_path.as_posix(), "options": options})
+                for alias, required in sorted(selected["dependencies"].items()):
+                    roots.extend(collect(required, recipe_path, chain + [alias]))
+            return roots
+        roots = []
+        for alias, dependency in sorted(document["dependencies"].items()):
+            roots.extend(collect(dependency, manifest_path, [alias]))
+        def supplemental(source, metadata, chain):
+            # Revisit an already prepared recipe's transitive references for the
+            # solver. collect's recursion guard is per traversal, not a claim
+            # that a prior traversal's dependency edges may be discarded.
+            preparing.clear()
+            return [(required, reason) for required, reason in collect({"source": source}, manifest_path, list(chain), metadata)
+                    if required != source]
+        if roots:
+            installed_dlcs = {key for key, available in (("1", identity["phantomLiberty"]), ("2", identity["redmod"])) if available}
+            native_solution = solve_nexus(roots, store.nexus_metadata, supplemental=supplemental, progress=progress, installed_dlcs=installed_dlcs)
+
     def visit(dependency, declaring, chain):
         progress("Resolving " + " -> ".join(chain))
         supplement, native, acquired = None, None, None
@@ -293,10 +352,15 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
             exact = store.nexus_metadata.exact_source(dependency["source"], ask)
             dependency = {**dependency, "source": exact}
             native = store.nexus_metadata.metadata(exact)
+        prepared = prepared_recipes.get(source_identity(dependency["source"], declaring))
+        if prepared and "recipe" not in dependency:
+            dependency = {**prepared, **dependency}
+            supplement = prepared_provenance.get(source_identity(dependency["source"], declaring))
+        native_selections = native_solution["selections"].get(json_digest(dependency["source"])) if native_solution else None
         if "recipe" not in dependency and native and native["complete"]:
             from .nexus import recipe_from_metadata
             acquired = store.acquire(dependency, declaring)
-            native_recipe = recipe_from_metadata(native, acquired["sha256"], ask=ask)
+            native_recipe = recipe_from_metadata(native, acquired["sha256"], ask=ask, selections=native_selections)
             recipe_path = store.root / "native-recipes" / (json_digest(native_recipe) + ".json")
             if recipe_path.exists():
                 if json.loads(recipe_path.read_text(encoding="utf-8")) != native_recipe:
@@ -323,7 +387,7 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
             from .nexus import recipe_from_metadata
             # Preserve native requirements alongside local installation recipes.
             # Supplemental metadata cannot silently delete provider constraints.
-            native_requirements = recipe_from_metadata(native, recipe["artifact"].removeprefix("sha256:"), ask=ask)
+            native_requirements = recipe_from_metadata(native, recipe["artifact"].removeprefix("sha256:"), ask=ask, selections=native_selections)
             for alias, required in native_requirements["dependencies"].items():
                 selected["dependencies"]["native-" + alias] = required
             for dlc in native_requirements.get("game", {}).get("dlc", []):
@@ -389,7 +453,7 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
     lock = {"schemaVersion": 1, "kind": "source-installation", "manifestSha256": json_digest(document),
             "game": identity, "packages": packages, "aliases": aliases, "dependencyEdges": edges,
             "priority": priority, "fileChoices": choices, "adapterVersion": "cp77-1", "externalPrerequisites": prerequisites, "registries": registry_snapshots,
-            "collection": collection}
+            "collection": collection, "candidateResolution": native_solution}
     if lock_path.exists():
         raise PackError("Lock destination exists; choose a new lockfile for explicit re-resolution")
     write_json(lock_path, lock)

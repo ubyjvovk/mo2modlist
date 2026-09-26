@@ -70,7 +70,27 @@ class NexusProvider:
                 "complete": complete, "provenance": "nexus-v3-file-requirements"}
 
 
-def recipe_from_metadata(metadata, sha256, *, ask=None):
+def candidate_groups(metadata, *, allow_empty=False):
+    source = metadata["source"]
+    for definition in metadata["materialized"]["dependencies"]:
+        candidates = []
+        for file in definition["candidate_mod_files"]:
+            mod = file["mod"]
+            if mod["game"]["domain_name"] != source["game"]:
+                raise InputRequired("foreign-game-dependency", "A Nexus requirement belongs to another game", definition=definition["id"])
+            if mod.get("status", "published") != "published":
+                continue
+            for candidate in file["candidate_versions"]:
+                if candidate["category"] in ACTIVE:
+                    candidates.append((str(file["id"]), candidate, {"type": "nexus", "game": source["game"],
+                        "modId": int(mod["game_scoped_id"]), "fileId": int(candidate["game_scoped_id"])}))
+        candidates.sort(key=lambda item: (item[0], -Decimal(item[1]["position"]), str(item[1]["id"])))
+        if not candidates and not allow_empty:
+            raise PackError("No eligible version satisfies Nexus dependency " + str(definition["id"]))
+        yield str(definition["id"]), candidates
+
+
+def recipe_from_metadata(metadata, sha256, *, ask=None, selections=None):
     if not metadata["complete"]:
         raise InputRequired("dependency-metadata", "Nexus file metadata is empty and legacy page requirements are unknown; supply a recipe", source=metadata["source"])
     version, source = metadata["version"], metadata["source"]
@@ -95,27 +115,16 @@ def recipe_from_metadata(metadata, sha256, *, ask=None):
         required_dlcs.add(chosen)
     if required_dlcs:
         recipe["game"] = {"id": "cyberpunk2077", "dlc": sorted(required_dlcs)}
-    for definition in metadata["materialized"]["dependencies"]:
-        candidates = []
-        for file in definition["candidate_mod_files"]:
-            mod = file["mod"]
-            if mod["game"]["domain_name"] != source["game"]:
-                raise InputRequired("foreign-game-dependency", "A Nexus requirement belongs to another game", definition=definition["id"])
-            if mod.get("status", "published") != "published":
-                continue
-            for candidate in file["candidate_versions"]:
-                if candidate["category"] not in ACTIVE:
-                    continue
-                candidates.append((str(file["id"]), candidate, {"type": "nexus", "game": source["game"],
-                    "modId": int(mod["game_scoped_id"]), "fileId": int(candidate["game_scoped_id"])}))
-        candidates.sort(key=lambda item: (item[0], -Decimal(item[1]["position"]), str(item[1]["id"])))
-        if not candidates:
-            raise PackError("No eligible version satisfies Nexus dependency " + str(definition["id"]))
-        if len(candidates) == 1:
+    for definition_id, candidates in candidate_groups(metadata):
+        if selections is not None:
+            selected = next((item for item in candidates if item[2] == selections.get(definition_id)), None)
+            if selected is None:
+                raise PackError("Solved Nexus candidate no longer satisfies its snapshotted definition")
+        elif len(candidates) == 1:
             selected = candidates[0]
         else:
             request = InputRequired("nexus-dependency", "Choose a candidate satisfying this Nexus dependency range",
-                definition=definition["id"], choices=[str(v["id"]) for _, v, _ in candidates],
+                definition=definition_id, choices=[str(v["id"]) for _, v, _ in candidates],
                 labels=[f"{v['name']} — {v['version']}" for _, v, _ in candidates])
             if ask is None:
                 raise request
@@ -123,5 +132,5 @@ def recipe_from_metadata(metadata, sha256, *, ask=None):
             selected = next((item for item in candidates if str(item[1]["id"]) == choice), None)
             if selected is None:
                 raise PackError("Invalid Nexus dependency candidate")
-        recipe["dependencies"]["nexus-definition-" + str(definition["id"])] = {"source": selected[2]}
+        recipe["dependencies"]["nexus-definition-" + definition_id] = {"source": selected[2]}
     return recipe

@@ -2,7 +2,9 @@
 
 A recipe is metadata for one exact source artifact. It never executes code. The importer currently needs an explicit recipe or matching registry entry when native dependency metadata is unavailable. An empty `dependencies` object is the recipe author's assertion that there are no required mod dependencies; missing metadata is not equivalent to that assertion.
 
-With a stored Nexus API key, the experimental v3 file adapter can generate metadata for a file with declared native requirements. It preserves raw range definitions, obtains materialized candidates from Nexus and converts a selected candidate to an exact manifest source. Empty new-style requirements still need a recipe because the current GET schema does not expose the legacy-requirements mode. Local installation recipes do not silently remove available native required edges. The CP77 adapter maps verified Nexus DLC IDs 1/2 to Phantom Liberty/REDmod. Candidate backtracking remains future work; multiple native candidates currently request an explicit choice.
+With a stored Nexus API key, the experimental v3 file adapter can generate metadata for a file with declared native requirements. It preserves raw range definitions, obtains materialized candidates from Nexus and converts a selected candidate to an exact manifest source. Empty new-style requirements still need a recipe because the current GET schema does not expose the legacy-requirements mode. Local installation recipes do not silently remove available native required edges. The CP77 adapter maps verified Nexus DLC IDs 1/2 to Phantom Liberty/REDmod.
+
+Vendored resolvelib 1.2.1 intersects these finite candidate domains and backtracks across incompatible native requirements. Exact manifest and supplemental recipe pins constrain the search, including Nexus pins reached through GitHub/local recipes. Within a lineage, candidates are ordered by descending provider position, with canonical source digest as the tie-breaker; alternatives across lineages follow stable lineage ordering. Missing native DLC or an empty dependency domain excludes a candidate. Unknown metadata requests a recipe, rather than treating the candidate as dependency-free. Upstream labels are never assumed to be SemVer. Ambiguous top-level page references and recipe options still require explicit choices.
 
 ```json
 {
@@ -44,7 +46,7 @@ Options are finite string choices. They may have a default; otherwise the import
 }
 ```
 
-An alternative maps every choice of a declared option to one dependency. Only the selected dependency is expanded, under alias `alternative-<option>`. Its selection and edge are locked. Incompatible explicit choices produce an error with both dependency chains. This is explicit-choice resolution; automatic alternative backtracking and version-range solving are not implemented yet.
+An alternative maps every choice of a declared option to one dependency. Only the selected dependency is expanded, under alias `alternative-<option>`. Its selection and edge are locked. Incompatible explicit choices produce an error with both dependency chains. Recipe options remain user choices; the solver does not change them to make a pack fit. Automatic backtracking applies to native Nexus materialized dependency domains. Arbitrary GitHub tag ranges remain deferred as specified in SPEC.md.
 
 ## Git registries
 

@@ -173,7 +173,7 @@ import_lock(root / "modlist.json", root / "modlist.lock.json", ArtifactStore(roo
             self.resolve({"mod": dep})
         self.assertFalse(self.lock.exists())
 
-    def test_native_nexus_metadata_expands_into_recipe_backed_transitive_source(self):
+    def test_native_nexus_metadata_respects_shared_pin_without_manual_candidate_prompt(self):
         self.dependency("base", {"r6/scripts/base.reds": b"base"})
         self.dependency("feature", {"r6/scripts/feature.reds": b"feature"})
         feature_source = {"type": "nexus", "game": "cyberpunk2077", "modId": 1, "fileId": 2}
@@ -183,20 +183,24 @@ import_lock(root / "modlist.json", root / "modlist.lock.json", ArtifactStore(roo
             "raw": {"dlc_dependency_definitions": []},
             "materialized": {"dependencies": [{"id": "base", "candidate_mod_files": [{"id": "base-lineage",
                 "mod": {"game_scoped_id": "3", "game": {"domain_name": "cyberpunk2077"}},
-                "candidate_versions": [{"id": "v-base", "name": "Base", "category": "main", "game_scoped_id": "4", "version": "1", "position": "1"}]}]}]}}
+                "candidate_versions": [{"id": "v-base", "name": "Base", "category": "main", "game_scoped_id": "4", "version": "1", "position": "1"},
+                    {"id": "v-base-new", "name": "Base new", "category": "main", "game_scoped_id": "5", "version": "2", "position": "2"}]}]}]}}
         self.store.nexus_fetch = lambda source: self.root / ("feature.zip" if source["fileId"] == 2 else "base.zip")
         self.store.nexus_metadata = SimpleNamespace(exact_source=lambda source, ask: source,
-            metadata=lambda source: metadata if source == feature_source else {"source": base_source, "complete": False})
+            metadata=lambda source: metadata if source == feature_source else {"source": base_source, "complete": False,
+                "version": {"file": {"id": "base-lineage"}, "version": "1", "position": "1"}})
         document = {"schemaVersion": 1, "name": "Native", "game": {"id": "cyberpunk2077", "dlc": []},
-            "dependencies": {"feature": {"source": feature_source}}}
+            "dependencies": {"feature": {"source": feature_source}, "base": {"source": base_source, "recipe": "base.recipe.json"}}}
         self.manifest.write_text(json.dumps(document))
         lock = resolve_manifest(self.manifest, self.store, self.game, self.lock,
-            ask=lambda request: (self.root / "base.recipe.json").as_posix())
+            ask=lambda request: self.fail("Unexpected manual prompt: " + request["kind"]))
         self.assertEqual(len(lock["packages"]), 2)
         feature = lock["packages"][lock["aliases"]["feature"]]
         self.assertEqual(feature["artifact"]["integrityKind"], "locally-observed")
         self.assertEqual(feature["metadataProvenance"]["kind"], "nexus-v3-file-requirements")
         self.assertEqual(feature["nativeMetadata"], metadata)
+        self.assertEqual(lock["candidateResolution"]["engine"], "resolvelib-1.2.1")
+        self.assertEqual(lock["candidateResolution"]["components"]["nexus:cyberpunk2077:lineage:base-lineage"], base_source)
         import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "Native")
 
     def test_collection_external_steps_require_fresh_target_acknowledgement(self):

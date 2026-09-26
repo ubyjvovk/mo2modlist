@@ -1,5 +1,15 @@
 # Progress: 2026-09-26
 
+## 0.5.0 native candidate resolution
+
+- Added resolvelib 1.2.1 as an unmodified vendored dependency with its ISC license. The wheel SHA-256 was checked against PyPI metadata: `fb06b66c8da04172d9e72a21d7d06186d8919e32ae5ab5cdf5b9d920be805ac2`. MO2 needs no runtime pip installation.
+- Native Nexus ranges use provider-materialized finite candidates and file lineages. The solver intersects shared constraints, respects exact pack/recipe pins, backtracks through transitive incompatibilities and alternatives, permits satisfiable cycles, and explains unsatisfiable chains. Missing DLC and empty candidate domains can fall back to another eligible version; unknown metadata still requires an explicit recipe.
+- Supplemental recipes are collected before archive acquisition, including Nexus pins reached through GitHub/local dependencies. Selected candidates and the solver identity are retained in the lock. Top-level ambiguous page references and finite recipe options remain explicit choices; arbitrary tag SemVer inference is not added.
+- 57 tests pass, including shared constraints, transitive backtracking, component alternatives, cycles, unavailable DLC, empty domains and a full planning/install test with a shared exact pin and no candidate prompt.
+- `artifacts/source-ui-probe-solver1/probe-result.json` records success with `solverEngine: resolvelib-1.2.1` inside MO2, plus Collection fixture import and a second profile installed from cache/lock. This remains fixture evidence, not live authenticated Nexus or gameplay acceptance.
+
+Remaining: live authenticated Nexus metadata/downloads and a representative Collection, remaining root ownership/restoration and fresh-instance prerequisite checks, and a real mixed-source playable-profile reproduction. The goal remains active.
+
 ## 0.4.1 locked-install verification
 
 The previous goal turn was progress: commits through `c66ce7c` added the source importer and Collection workflows. This continuation inspected the current worktree and tightened the still-open verification requirements without changing the objective.
