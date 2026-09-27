@@ -21,7 +21,7 @@ Status: 2026-09-27, version 0.6.0. Implementation is available; final live accep
 2. Resolve `artifacts/itp-nexus-test/modlist.json` to its complete lock, review actual output mappings/collisions, and install into a fresh named profile in the cleaned disposable MO2. Do not publish a partial profile.
 3. Verify managed files and readable names, then reproduce the lock in a second profile with network access disabled. Export/re-import the resulting profile with its verified recipe references available.
 4. Launch through the test MO2 and perform a loaded-world/input/mod-function check. The user's successful Probe - Reimport run was an older snapshot import, before the authorized test cleanup.
-5. Validate a representative real Collection using the now-configured API key or a complete downloaded package. Preserve unresolved installer choices as incomplete.
+5. Complete real Collection resolution/import. CET+Essentials revision 49 was downloaded and converted to 11 exact file references. Installation is still blocked by its declared `2.3.1.0` game version versus observed `2.31`; a dependency-only probe also requires review of Virtual Atelier's optional legacy requirement. Preserve unresolved choices as incomplete. Evidence is under `artifacts/live-collection-20260927`.
 6. Recheck stable-profile preservation and record final scope limits. Stable installation is outside cleanup/deployment scope.
 
 The prior test data is recoverable under `test-install/cleanup-20260927`; the current instance has only an empty Default profile until the new installation succeeds. Browser/desktop control tools were absent during the latest work, so website-only downloads await a supported interactive flow.

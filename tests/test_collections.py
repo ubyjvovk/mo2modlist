@@ -27,6 +27,25 @@ class CollectionTests(unittest.TestCase):
             write_collection_manifest(draft, destination)
             self.assertTrue(destination.exists())
 
+    def test_profile_recommendation_is_advisory_and_preserved(self):
+        for recommendation in (True, False):
+            collection = self.fixture()
+            collection["collectionConfig"] = {"recommendNewProfile": recommendation}
+            draft = convert_collection(collection)
+            self.assertTrue(draft["complete"])
+            self.assertEqual(draft["manifest"]["extensions"]["nexusCollection"]["collectionConfig"],
+                             collection["collectionConfig"])
+
+    def test_unknown_or_malformed_collection_config_requires_review(self):
+        for config in (None, [], "", {"recommendNewProfile": 1}, {"recommendNewProfile": "false"},
+                       {"futureOption": False}):
+            collection = self.fixture()
+            collection["collectionConfig"] = config
+            draft = convert_collection(collection)
+            self.assertFalse(draft["complete"])
+            self.assertIn({"kind": "collection-extension", "field": "collectionConfig",
+                           "message": "Unknown Collection configuration requires review"}, draft["pending"])
+
     def test_optional_and_installer_data_remain_pending(self):
         collection = self.fixture()
         collection["mods"][0].update(optional=True, choices={"fomod": "selected"}, patches={"config.ini": "patch"})

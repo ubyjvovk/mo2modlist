@@ -295,12 +295,19 @@ silently discarded; its explicit recipe handoff is part of later resolution.
             normalized_rules.append({"source": source, "target": target, "type": kind})
     if "modRules" not in document:
         pending.append({"kind": "full-package", "message": "This may be the filtered website preview. Supply the full collection package to preserve installer and ordering information."})
-    known = {"info", "mods", "modRules"}
+    config = document.get("collectionConfig", {})
+    if (not isinstance(config, dict) or set(config) - {"recommendNewProfile"}
+            or ("recommendNewProfile" in config and type(config["recommendNewProfile"]) is not bool)):
+        pending.append({"kind": "collection-extension", "field": "collectionConfig",
+                        "message": "Unknown Collection configuration requires review"})
+    elif config:
+        notes.append("Collection profile recommendation retained; MO2 Modlists always imports into a new profile")
+    known = {"info", "mods", "modRules", "collectionConfig"}
     for key in sorted(document.keys() - known):
         if document[key]:
             pending.append({"kind": "collection-extension", "field": key})
     manifest["extensions"] = {"nexusCollection": {"schemaVersion": 1, "identity": identity or {},
-        "metadataSha256": collection_sha, "rules": normalized_rules, "pathWinners": path_winners,
+        "metadataSha256": collection_sha, "collectionConfig": config, "rules": normalized_rules, "pathWinners": path_winners,
         "manualHandoffs": handoffs, "externalInstructions": info.get("installInstructions") or ""}}
     validate_manifest(manifest)
     return {"manifest": manifest, "pending": pending, "notes": notes,

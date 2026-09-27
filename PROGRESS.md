@@ -1,5 +1,12 @@
 # Progress: 2026-09-26
 
+## Real Collection validation — 2026-09-27
+
+- Downloaded the full authenticated Nexus package for CET+Essentials (`n0nymh`, revision 49, revision ID 698560). Package SHA-256: `7674ebd75105a6750e5d5ac09aad86765deea2f0998558c657c0e4ef2b672186`. Conversion now produces a manifest with all 11 exact recorded Nexus file IDs.
+- Recognized the upstream `collectionConfig.recommendNewProfile` boolean as advisory metadata, preserving it in manifest extensions. Imports still use new profiles. Unknown configuration keys and non-boolean values remain pending review. Upstream type checked in `extension-collections/src/types/ICollectionConfig.ts`; both boolean values and malformed configurations have regression coverage. All 72 tests pass.
+- Real installation remains unproven: the Collection declares `2.3.1.0`, while the test game's product version is `2.31`. Resolution correctly stops before installation; no unverified version equivalence was introduced. An independent dependency-only probe also stops at Virtual Atelier's legacy Browser Extension requirement marked `Optional`, requiring explicit metadata review. It does not constitute a complete lock or installation.
+- Evidence: `artifacts/live-collection-20260927/{collection.json,modlist.json,converted-result.json,dependency-resolution.json}`. No test or stable profiles were modified by these probes.
+
 ## 0.6.0 — 2026-09-27: Nexus URL conversion, live requirements, readable names
 
 - Added CLI `from-url` and MO2 **Create manifest from Nexus URL…**. Mod conversion pins the root and direct requirements, retaining DLC constraints; Collections reuse full-package conversion/review. Unknown metadata blocks finalization. The user clarified that direct requirements must be explicit and pinned, while transitive expansion belongs to resolution.
