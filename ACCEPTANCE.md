@@ -1,29 +1,30 @@
 # Source importer acceptance
 
-Status: 2026-09-27, version 0.6.2. Real ITP download, installation, offline reproduction and export/re-import passed; user confirmed third-person gameplay works. Real Collection resolution, cache-only installation, 138-file verification and startup passed. Current mixed-source installation, network-blocked reproduction, 99-file verification and startup also passed. Collection and mixed-source loaded-world checks remain unverified. User requested autonomous computer-use playtesting, but the required runtime/tools are absent from the session.
+Status: 2026-09-27, version 0.6.3. The specified source-manifest workflow and representative CP77/Nexus Collection acceptance checks have passed. The release remains a development preview with the scope limits below.
 
-| Requirement | Evidence | Remaining check |
+| Requirement | Evidence | Scope |
 | --- | --- | --- |
-| Export only Manifest v1 JSON; unknown-source Local/URL/Skip prompts | Manifest tests and real MO2 export probes | None for covered paths |
-| Mixed Nexus, GitHub and local sources with transitive dependencies | Current 12-component mixed ITP pack installed twice; 99 managed files verified in both profiles | Loaded-world smoke |
-| Recipe options, alternatives, conflicts, native candidate backtracking | Resolver tests and live eight-component ITP graph installed | Broader live alternative/conflict cases |
-| Exact locks, verified cache, offline reinstall | Real ITP and mixed-source locks reproduced with socket networking blocked; 94/99 files verified | None for covered packs |
-| Archive safety, collisions, stage before activation, interrupted recovery | Automated tests including hard process exit and changed download validators | No general claim about every archive or runtime conflict |
-| Physical root deployment with ownership and restoration | Real framework launch and real MO2 restoration probes | Loaded-world check; physical writes affect all profiles using that game |
-| Profile export preserves verified installation recipe references | Real eight-component ITP export/re-import; 94 files verified | Real mixed-source profile re-export on current version |
-| Nexus Collection package/rules/manual choices | Full-package fixtures and real MO2 Collection fixture imports | Representative downloaded Collection or authenticated live revision |
-| Nexus acquisition and manual fallback | Real Premium API downloads of ITP and Native Settings matched published hashes | Non-Premium transfer requires website handoff |
-| Existing installation preserved | Disposable MO2/game only; stable Play hash recorded in PROGRESS.md | Recheck at final acceptance |
+| Export only Manifest v1 JSON; unknown-source Local/URL/Skip prompts | Manifest tests, real MO2 export probes and one-file ITP/mixed-source exports | No archives, local edits or saves exported |
+| Nexus, GitHub and local sources, including transitive dependencies | Twelve-component mixed ITP pack installed twice; 99 initial managed files verified in each profile | Real GitHub framework release assets, Nexus mods and local observer archive |
+| Recipes, variants, alternatives, conflicts and reason chains | Resolver tests, native candidate backtracking tests, live ITP graph | Unknown metadata and unsupported installer choices block completion |
+| Exact locks, cache and offline reinstall | ITP and mixed-source locks reproduced with socket networking blocked; 94/99 initial files verified | Offline install requires finalized lock and cached archives; fresh resolution may need provider metadata |
+| Archive safety, collisions and interruption recovery | Tests cover unsafe paths/links, conflicting outputs, validator changes and hard process exit | No claim to detect semantic conflicts inside different game archives |
+| Physical root deployment and restoration | Real MO2 restoration probes and framework gameplay; CET reload regression fixed in 0.6.3 | Root writes affect all profiles sharing a game directory; keep extension enabled for runtime mappings |
+| Profile re-export retains verified recipes | Eight-component ITP export/re-import verified 94 files; twelve-component mixed-source re-export resolves to identical managed output hashes | Local recipe/archive references must remain accessible |
+| Real Nexus Collection conversion and import | Authenticated CET+Essentials revision 49, all 11 exact pins preserved, three explicitly reviewed recipes, 138 initial files verified | Browser Extension/Virtual Atelier settings and loaded-world movement smoke passed |
+| Playable fresh profile | User confirmed ITP third-person operation; autonomous mixed-source and Collection save/load/move/crouch checks passed | Representative smoke checks, not long-duration stability tests |
+| Existing installation preserved | Stable Play hash matches September 27 baseline; deployment confined to disposable MO2/game directories | Windows Saved Games location was repaired separately after failed-drive discovery |
 
-## Resume live acceptance
+The automated suite has 78 passing tests. Additional acceptance cases include unavailable locked assets, selected-variant output separation, source identity/hash changes, manifest/lock mismatch, native dependency omission, root restoration protection and unsupported Collection choices.
 
-1. Completed: Premium downloaded ITP 32203/161480 and Native Settings UI 3518/63684; six framework archives were reused by matching Nexus-published hashes.
-2. Completed: resolved eight components and installed `ITP - Nexus Test` with readable names.
-3. Completed: `ITP - Offline Test` installed with network connections blocked; one-file export imported into `ITP - Reexport Test`. All three profiles verified 94 managed files without differences before launch.
-4. Completed: launched `ITP - Nexus Test`; script compilation and ITP/nativeSettings loading succeeded. User confirmed third-person mod gameplay works.
-5. Complete real Collection gameplay check. CET+Essentials revision 49 installed from cache into `test-collection/MO2`, with every original pin preserved and three explicit review recipes. All 138 managed files verified; frameworks loaded and scripts compiled. User loaded-save/UI confirmation is pending. Evidence is under `artifacts/live-collection-20260927`.
-6. Recheck stable-profile preservation and record final scope limits. Stable installation is outside cleanup/deployment scope.
+## Live evidence
 
-The prior test data is recoverable under `test-install/cleanup-20260927`. Current profiles are Default and the three ITP acceptance profiles. Browser/desktop control tools remain unavailable; Premium API access removed the archive-download blocker.
+- `artifacts/itp-nexus-test`: Premium acquisition, exact dependency graph, install, offline reproduction and export/re-import.
+- `artifacts/mixed-itp-test`: two installations, network-blocked reproduction, initial file verification, re-export comparison and `fixed-{mods,world,moved-crouched}.png`.
+- `artifacts/live-collection-20260927`: downloaded package, explicit review decisions, resolved lock, installation, initial verification and `playtest-{modsettings,world,moved}.png`.
 
-Current evidence lives under ignored `artifacts/`; private manifests, caches, credentials and screenshots are not release contents. The disposable game is a copy based on GOG's installed-file list, not a vendor-hash-verified pristine download.
+The first hands-on reload exposed CET Lua lookup failures caused by runtime Overwrite directories. The focused 0.6.3 file mapper fixes these without deleting runtime files or changing installed mod bytes. A broader experimental mapping caused one crash and was removed; no new crash report followed the focused implementation's gameplay checks. The passive observer's player-existence log is not used as proof that a save loaded.
+
+The test save initially could not be found because Windows Saved Games still referred to the failed F: drive. That known-folder location was repaired and the preserved test autosave copied to the restored location without overwriting existing saves. See PROGRESS.md for the repair record.
+
+Private manifests, caches, credentials, helper code and screenshots under ignored `artifacts/` are not release contents. Disposable game directories were copied from GOG's installed-file list, not verified against vendor hashes. Non-Premium acquisition remains a website/manual-archive handoff; universal mod/runtime compatibility is not claimed.

@@ -33,9 +33,10 @@ class Worker(QThread):
             self.error.emit(traceback.format_exc())
 
 
-class ModlistsTool(mobase.IPluginTool):
+class ModlistsTool(mobase.IPluginTool, mobase.IPluginFileMapper):
     def __init__(self):
-        super().__init__()
+        mobase.IPluginTool.__init__(self)
+        mobase.IPluginFileMapper.__init__(self)
         self.organizer = None
         self.parent = None
 
@@ -48,6 +49,29 @@ class ModlistsTool(mobase.IPluginTool):
     def name(self):
         return "MO2 Modlists"
 
+    def mappings(self):
+        import json
+        from PyQt6.QtCore import qWarning
+        from .mo2_modlists.runtime_mapping import cet_root_files
+        profile = Path(self.organizer.profilePath())
+        lock_path = profile / "modlist.lock.json"
+        if not lock_path.is_file():
+            return []
+        try:
+            game = Path(self.organizer.managedGame().gameDirectory().absolutePath())
+            lock = json.loads(lock_path.read_text(encoding="utf-8-sig"))
+            result = []
+            for rel, target in cet_root_files(lock, game):
+                # Existing enabled mod/Overwrite mappings retain their priority.
+                origins = self.organizer.findFiles(str(Path(rel).parent), target.name)
+                if origins and Path(origins[0]).resolve() != target.resolve():
+                    continue
+                result.append(mobase.Mapping(str(target), str(target), False, False))
+            return result
+        except (OSError, ValueError, KeyError, TypeError, PackError) as exc:
+            qWarning("MO2 Modlists: cannot map CET runtime files: " + str(exc))
+            return []
+
     def localizedName(self):
         return self.name()
 
@@ -58,7 +82,7 @@ class ModlistsTool(mobase.IPluginTool):
         return "Export source manifests; resolve and install pinned modlists and review Nexus Collections."
 
     def version(self):
-        return mobase.VersionInfo(0, 6, 2)
+        return mobase.VersionInfo(0, 6, 3)
 
     def settings(self):
         return [mobase.PluginSetting("archive-directories", "Additional download directories, separated by semicolons", ""),
