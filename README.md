@@ -1,6 +1,17 @@
 # MO2 Modlists
 
-Version 0.7 development preview supports Cyberpunk 2077 and Fallout: New Vegas. It exports **one `modlist.json`**, following [SPEC.md](SPEC.md), and implements a separate source resolver/importer. Export does not include locks, blobs or copied archives. The old installed-snapshot importer remains removed. Locks and caches are produced during resolution/import.
+MO2 Modlists is a Mod Organizer 2 extension for describing and recreating a mod setup from **one readable `modlist.json`**. Its aim is to make mod installation work more like a software package manager: record the mods you want and their sources, resolve their dependencies, then install a reproducible setup without repeating the same manual download and configuration steps.
+
+The manifest describes mods and pinned versions from Nexus Mods, GitHub release assets, or local archives. It can be shared and versioned without bundling the mod files themselves. Version 0.7 is a development preview supporting **Cyberpunk 2077** and **Fallout: New Vegas**; the agreed manifest format is documented in [SPEC.md](SPEC.md).
+
+## How it works
+
+1. **Describe the setup.** Export an existing MO2 profile, convert a Nexus mod or Collection URL, or write a manifest yourself. A mod URL includes its direct requirements; resolution expands transitive dependencies.
+2. **Resolve and review.** The resolver selects exact artifacts and uses dependency metadata and installation recipes to determine what to install and where. Missing metadata, required installer choices, and unresolved file conflicts need review before the installation can be finalized.
+3. **Lock and cache.** Resolution produces a lock recording the exact artifacts, hashes, recipes, and selections, and downloads verified archives into a reusable cache. A finalized lock can be installed fully offline when all its archives are cached.
+4. **Install a fresh profile.** The importer stages the resolved files and creates a new MO2 profile with the recorded priorities and choices. The manifest remains the editable description; the lock and cache provide the concrete inputs for repeatable installation.
+
+This reproduces the managed mod installation, not a complete backup of saves, local configuration edits, or MO2 overwrite contents. Local archive and recipe references must remain available on the importing machine. Frameworks that require files in the game directory use tracked physical deployment, so those files are shared between profiles. See the workflows below for these boundaries and the required review steps.
 
 ## Create a manifest from a Nexus URL
 
