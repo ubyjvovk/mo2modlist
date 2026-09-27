@@ -129,12 +129,13 @@ class ImportController(QObject):
         from .mo2_modlists.nexus import NexusProvider
         github_headers = headers("github")
         nexus_headers = headers("nexus")
+        account_status = {}
         def nexus_fetch(source):
             if nexus_headers:
-                if not hasattr(self, "nexus_premium"):
+                if "premium" not in account_status:
                     account = json_request("https://api.nexusmods.com/v1/users/validate.json", headers=nexus_headers)
-                    self.nexus_premium = bool(account.get("is_premium"))
-                if not self.nexus_premium:
+                    account_status["premium"] = bool(account.get("is_premium"))
+                if not account_status["premium"]:
                     return self.ask({"kind": "nexus-archive", "source": source,
                         "message": "This Nexus account requires the website download flow. Download this exact file, then select its ZIP/7z. Existing cached bytes are reused automatically."})
             return self.ask({"kind": "nexus-download", "source": source})
@@ -166,8 +167,6 @@ class ImportController(QObject):
                 if not accepted:
                     return
                 save(provider, secret)
-            if provider == "nexus" and hasattr(self, "nexus_premium"):
-                del self.nexus_premium
             QMessageBox.information(parent, "Provider credential", "Credential updated in Windows Credential Manager. It is never exported into manifests or locks.")
         except PackError as exc:
             QMessageBox.warning(parent, "Provider credential", str(exc))

@@ -1,5 +1,12 @@
 # Progress: 2026-09-26
 
+## Follow-up acceptance preparation — 2026-09-27
+
+- Re-resolved the real mixed-source acceptance manifest with current code and authenticated native metadata. `artifacts/mixed-source-smoke1/current-source.lock.json` contains six components, five dependency edges, and GitHub release, Nexus and local-archive sources. This is a planning result; current-version mixed-source reinstall/gameplay remains pending.
+- Fixed MO2 account-status caching: Premium status is now cached only within one acquisition operation. A new import refreshes it, so an account upgrade does not require restarting MO2 or re-entering the key. No credentials are exported.
+- Corrected recipe documentation that incorrectly listed unsupported `extensions` among recipe fields. Manifest extensions remain supported.
+- Cyberpunk PID 4376 was still running when checked; deployment remains blocked as required by SPEC.md. The existing close-game request is pending; no repeated prompt or forced shutdown was issued.
+
 ## 0.6.2 — historical Collection pins and ITP gameplay confirmation
 
 - User confirmed the third-person mod works in the launched ITP test. This completes its loaded-game mod-function check, following the verified install, offline reproduction and profile export/re-import.

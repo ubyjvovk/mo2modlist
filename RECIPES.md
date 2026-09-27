@@ -22,7 +22,7 @@ Vendored resolvelib 1.2.1 intersects these finite candidate domains and backtrac
 }
 ```
 
-Required fields are `schemaVersion`, `component`, `version`, `revision`, `artifact` and `dependencies`. Optional fields are `mappings`, `game`, `conflicts`, `options`, `variants`, `alternatives` and `extensions`. Other fields are rejected. The artifact digest above is a placeholder.
+Required fields are `schemaVersion`, `component`, `version`, `revision`, `artifact` and `dependencies`. Optional fields are `mappings`, `game`, `conflicts`, `options`, `variants` and `alternatives`. Other fields are rejected. The artifact digest above is a placeholder.
 
 `dependencies` has the same alias/dependency shape as the manifest. Relative archive and recipe references inside it resolve against this recipe's location. `component` explicitly establishes identity across references and sources. A profile can select only one version/artifact/recipe/options combination per component. Different components on the same Nexus page can coexist. Upstream version labels are preserved; current constraints are exact artifact/component assignments, not SemVer range inference.
 
