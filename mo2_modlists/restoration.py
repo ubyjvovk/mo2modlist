@@ -81,7 +81,7 @@ def restoration_plan(mo2, game, operation_id):
 def restore_root(mo2, game, operation_id, *, reviewed_sha256, progress=lambda text: None,
                  failure_hook=lambda phase: None):
     mo2, game = mo2.resolve(), game.resolve()
-    require_game_closed()
+    require_game_closed(game)
     with installation_guard(mo2):
         plan = restoration_plan(mo2, game, operation_id)
         if json_digest(plan) != reviewed_sha256:

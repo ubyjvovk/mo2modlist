@@ -11,6 +11,7 @@ import re
 from .acquisition import InputRequired, reference_path
 from .core import PackError, digest, game_identity, json_digest, safe_relative, write_json
 from .manifest import fields, validate_manifest
+from .games import ADAPTERS, executable, installed_dlcs, nexus_dlcs, overlay_path
 from .sources import members, stream_member
 
 
@@ -101,7 +102,10 @@ def selected_recipe(recipe, options, ask=None):
     return result, chosen
 
 
-def automatic_mappings(index):
+def automatic_mappings(index, game_id="cyberpunk2077"):
+    if game_id == "newvegas":
+        from .games import fnv_mappings
+        return fnv_mappings(index)
     names = [name for name, _ in index]
     if any("fomod/" in name.casefold() for name in names):
         raise InputRequired("installer-choice", "This archive has a FOMOD installer. Supply an explicit recipe mapping and record the selected options.")
@@ -119,9 +123,9 @@ def automatic_mappings(index):
     return mapped
 
 
-def outputs_for(archive, mappings, progress, *, hash_contents=True):
+def outputs_for(archive, mappings, progress, *, hash_contents=True, game_id="cyberpunk2077"):
     index = list(members(archive))
-    mappings = automatic_mappings(index) if mappings is None else mappings
+    mappings = automatic_mappings(index, game_id) if mappings is None else mappings
     outputs = {}
     for mapping in mappings:
         fields(mapping, ("from", "to", "class"), (), "mapping")
@@ -144,6 +148,8 @@ def outputs_for(archive, mappings, progress, *, hash_contents=True):
                 continue
             found = True
             destination = safe_relative(destination)
+            if mapping["class"] == "mo2-overlay":
+                overlay_path(game_id, destination)
             key = destination.casefold()
             progress(f"Inspecting {destination}")
             entry = {"member": member, "path": destination, "class": mapping["class"], "size": size}
@@ -262,17 +268,20 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
         registry_snapshots[name] = snapshot
         registry_entries.extend(entries)
     identity = game_identity(game)
+    if identity["id"] != document["game"]["id"]:
+        raise PackError("Manifest game differs from target game")
     from .windows_version import product_version
-    observed_version = product_version(game / "bin/x64/Cyberpunk2077.exe")
-    fixed_version = product_version(game / "bin/x64/Cyberpunk2077.exe", fixed=True)
+    observed_version = product_version(executable(game))
+    fixed_version = product_version(executable(game), fixed=True)
     observed_versions = {value for value in (observed_version, fixed_version) if value}
     if observed_version:
         identity["version"] = observed_version
     if fixed_version:
         identity["fixedProductVersion"] = fixed_version
-    identity["redmod"] = (game / "tools/redmod/bin/redMod.exe").is_file()
+    if identity["id"] == "cyberpunk2077":
+        identity["redmod"] = (game / "tools/redmod/bin/redMod.exe").is_file()
     def has_dlc(dlc):
-        return identity["phantomLiberty"] if dlc == "phantom-liberty" else identity["redmod"] if dlc == "redmod" else False
+        return dlc in installed_dlcs(identity)
     for dlc in document["game"]["dlc"]:
         if not has_dlc(dlc):
             raise PackError(f"Required DLC is unavailable: {dlc}")
@@ -305,6 +314,8 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
             dependency = dict(dependency)
             source = dependency["source"]
             native = source["type"] == "nexus"
+            if native and source["game"] != identity["id"]:
+                raise PackError("Nexus dependency belongs to a different game")
             if native:
                 source = store.nexus_metadata.exact_source(source, ask)
                 dependency["source"] = source
@@ -347,11 +358,12 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
             return [(required, reason) for required, reason in collect({"source": source}, manifest_path, list(chain), metadata)
                     if required != source]
         if roots:
-            installed_dlcs = {key for key, available in (("1", identity["phantomLiberty"]), ("2", identity["redmod"])) if available}
-            native_solution = solve_nexus(roots, store.nexus_metadata, supplemental=supplemental, progress=progress, installed_dlcs=installed_dlcs)
+            native_solution = solve_nexus(roots, store.nexus_metadata, supplemental=supplemental, progress=progress, installed_dlcs=nexus_dlcs(identity))
 
     def visit(dependency, declaring, chain):
         progress("Resolving " + " -> ".join(chain))
+        if dependency["source"]["type"] == "nexus" and dependency["source"]["game"] != identity["id"]:
+            raise PackError("Nexus dependency belongs to a different game")
         supplement, native, acquired = None, None, None
         initial_source = source_identity(dependency["source"], declaring)
         if "recipe" not in dependency and not dependency.get("options") and initial_source in native_sources:
@@ -437,7 +449,7 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
                          "sourceReferences": [dependency["source"]],
                          "nativeMetadata": native,
                          "metadataProvenance": {"kind": "registry", "registry": supplement["registry"], "commit": supplement["commit"], "reason": supplement["reason"]} if supplement else {"kind": native.get("provenance", "nexus-v3-file-requirements") if acquired else "explicit-local-recipe"},
-                         "outputs": outputs_for(store.path(artifact["sha256"]), selected.get("mappings"), progress)}
+                         "outputs": outputs_for(store.path(artifact["sha256"]), selected.get("mappings"), progress, game_id=identity["id"])}
         native_sources[source_identity(artifact["source"], declaring)] = key
         for alias, required in sorted(selected["dependencies"].items()):
             required_key = visit(required, recipe_path, chain + [alias])
@@ -466,8 +478,11 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
             "notice": "Complete these external steps for this target installation; they are not performed by the importer."})
     lock = {"schemaVersion": 1, "kind": "source-installation", "manifestSha256": json_digest(document),
             "game": identity, "packages": packages, "aliases": aliases, "dependencyEdges": edges,
-            "priority": priority, "fileChoices": choices, "adapterVersion": "cp77-1", "externalPrerequisites": prerequisites, "registries": registry_snapshots,
+            "priority": priority, "fileChoices": choices, "adapterVersion": ADAPTERS[identity["id"]], "externalPrerequisites": prerequisites, "registries": registry_snapshots,
             "collection": collection, "candidateResolution": native_solution}
+    if identity["id"] == "newvegas":
+        from .newvegas import resolve_plugins
+        lock["plugins"] = resolve_plugins(document, lock, store, game)
     if lock_path.exists():
         raise PackError("Lock destination exists; choose a new lockfile for explicit re-resolution")
     write_json(lock_path, lock)

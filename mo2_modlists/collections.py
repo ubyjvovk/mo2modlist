@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import zipfile
 import urllib.parse
 
 from .acquisition import InputRequired, json_request, download
@@ -43,8 +44,8 @@ def collection_reference(value):
             revision = int(raw_revision)
     else:
         raise PackError("Use a Nexus Collection URL, NXM collection link, or downloaded package")
-    if game != "cyberpunk2077":
-        raise PackError("Only Cyberpunk 2077 collections are supported")
+    if game not in ("cyberpunk2077", "newvegas"):
+        raise PackError("Only Cyberpunk 2077 and Fallout New Vegas collections are supported")
     return {"game": game, "slug": slug, "revision": revision}
 
 
@@ -109,12 +110,14 @@ def match_reference(reference, mods):
     if not isinstance(reference, dict):
         return None
     allowed = {"repo", "fileMD5", "fileSize", "gameId", "versionMatch", "logicalFileName",
-               "tag", "idHint", "md5Hint", "description", "instructions"}
+               "tag", "idHint", "md5Hint", "description", "instructions", "fileExpression"}
     if reference.keys() - allowed:
         return None
     identifiers = set(reference) & {"repo", "fileMD5", "logicalFileName", "tag"}
     if not identifiers:
         return None
+    if "fileExpression" in reference and not (set(reference) & {"repo", "fileMD5", "tag"}):
+        return None  # Do not interpret Vortex glob expressions as exact identities.
     result = []
     for alias, mod in mods.items():
         source = mod.get("source", {})
@@ -151,6 +154,28 @@ def bundled_dependency(package, mod, cache, progress=lambda text: None):
     prefix = documents[0].rsplit("/", 1)[0] + "/" if "/" in documents[0] else ""
     wanted = (prefix + "bundled/" + relative).casefold()
     matches = [(name, size) for name, size in index if name.casefold() == wanted]
+    folder = [(name, size) for name, size in index if name.casefold().startswith(wanted + "/")]
+    if not matches and folder:
+        package_sha = digest(package)
+        destination = safe_join(cache, "collection-bundles/" + json_digest({"package": package_sha, "directory": wanted}) + ".zip")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(destination.name + ".partial")
+        try:
+            with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as output:
+                for member, size in sorted(folder):
+                    name = safe_relative(member[len(wanted) + 1:])
+                    entry = zipfile.ZipInfo(name, (1980, 1, 1, 0, 0, 0))
+                    entry.compress_type = zipfile.ZIP_DEFLATED
+                    with output.open(entry, "w") as stream:
+                        stream_member(package, member, stream, progress=progress)
+            if destination.exists() and digest(destination) != digest(temporary):
+                raise PackError("Cached bundled directory archive was modified")
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return {"source": {"type": "local-archive", "path": destination.resolve().as_posix()},
+                "integrity": "sha256:" + digest(destination),
+                "extensions": {"nexusBundledArtifact": {"collectionArchiveSha256": package_sha, "directory": wanted}}}
     if len(matches) != 1:
         raise InputRequired("collection-bundle", "Exact bundled archive is absent", member=wanted)
     member, size = matches[0]
@@ -218,10 +243,22 @@ silently discarded; its explicit recipe handoff is part of later resolution.
 """
     decisions = decisions or {}
     collection_sha = json_digest(document)
+    # A reviewed handoff is bound to the exact original metadata. This handles
+    # external installer/profile steps without claiming they ran automatically.
+    reviews = decisions.get("_collection", {}).get("reviews", {})
+    reviewed = {}
+    def handled(key, value):
+        review = reviews.get(key, {})
+        if (review.get("sha256") == json_digest(value) and review.get("collectionSha256") == collection_sha
+                and isinstance(review.get("note"), str) and review["note"].strip()):
+            reviewed[key] = review
+            notes.append("Reviewed handoff: " + key + ": " + review["note"])
+            return True
+        return False
     info = document["info"]
     game = info.get("domainName")
-    if game != "cyberpunk2077":
-        raise PackError("Collection game is not Cyberpunk 2077")
+    if game not in ("cyberpunk2077", "newvegas"):
+        raise PackError("Collection game is not supported")
     pending, notes, dependencies, retained = [], [], {}, {}
     normalized_rules, path_winners, handoffs = [], [], {}
     all_mods = {f"mod-{index:04d}": mod for index, mod in enumerate(document["mods"], 1)}
@@ -264,7 +301,7 @@ silently discarded; its explicit recipe handoff is part of later resolution.
             dep["extensions"] = {**dep.get("extensions", {}), "displayName": mod["name"]}
         dependencies[alias] = dep
         for path in mod.get("fileOverrides", []):
-            path_winners.append({"winner": alias, "path": safe_relative(path.replace("\\", "/"))})
+            path_winners.append({"winner": alias, "path": ("Data/" if game == "newvegas" else "") + safe_relative(path.replace("\\", "/"))})
         unsupported = installer_fields(mod)
         if unsupported:
             handoff = decision.get("handoff", {})
@@ -276,7 +313,9 @@ silently discarded; its explicit recipe handoff is part of later resolution.
                                 "message": "Supply an archive/recipe containing the chosen installer and patch outputs, with an explicit manual-handoff record"})
         if mod.get("domainName", game) != game:
             pending.append({"kind": "foreign-game", "alias": alias})
-    for rule in document.get("modRules", []):
+    for rule_index, rule in enumerate(document.get("modRules", [])):
+        if handled("modRules/" + str(rule_index), rule):
+            continue
         source = match_reference(rule.get("source"), all_mods)
         target = match_reference(rule.get("reference"), all_mods)
         kind = rule.get("type")
@@ -296,19 +335,20 @@ silently discarded; its explicit recipe handoff is part of later resolution.
     if "modRules" not in document:
         pending.append({"kind": "full-package", "message": "This may be the filtered website preview. Supply the full collection package to preserve installer and ordering information."})
     config = document.get("collectionConfig", {})
-    if (not isinstance(config, dict) or set(config) - {"recommendNewProfile"}
-            or ("recommendNewProfile" in config and type(config["recommendNewProfile"]) is not bool)):
+    if (not isinstance(config, dict) or set(config) - {"recommendNewProfile", "excludePluginRules"}
+            or any(type(config[k]) is not bool for k in config if k in ("recommendNewProfile", "excludePluginRules"))):
         pending.append({"kind": "collection-extension", "field": "collectionConfig",
                         "message": "Unknown Collection configuration requires review"})
     elif config:
         notes.append("Collection profile recommendation retained; MO2 Modlists always imports into a new profile")
     known = {"info", "mods", "modRules", "collectionConfig"}
     for key in sorted(document.keys() - known):
-        if document[key]:
+        if document[key] and not handled(key, document[key]):
             pending.append({"kind": "collection-extension", "field": key})
     manifest["extensions"] = {"nexusCollection": {"schemaVersion": 1, "identity": identity or {},
         "metadataSha256": collection_sha, "collectionConfig": config, "rules": normalized_rules, "pathWinners": path_winners,
-        "manualHandoffs": handoffs, "externalInstructions": info.get("installInstructions") or ""}}
+        "manualHandoffs": handoffs, "reviewedHandoffs": reviewed,
+        "externalInstructions": info.get("installInstructions") or ""}}
     validate_manifest(manifest)
     return {"manifest": manifest, "pending": pending, "notes": notes,
             "collectionSha256": collection_sha, "retainedInstructions": document, "decisions": decisions,

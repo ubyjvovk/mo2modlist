@@ -7,9 +7,10 @@ from pathlib import Path
 import re
 import urllib.parse
 
-from .core import (PackError, active_mods, digest, files, read_ini, runtime_noise,
+from .core import (PackError, active_mods, digest, files, read_ini, runtime_noise, game_identity,
                    safe_join, safe_relative, write_json)
 from .sources import github_source
+from .games import EXECUTABLES, detect_game, game_path, installed_dlcs
 
 
 def fields(value, required, optional, where):
@@ -63,14 +64,19 @@ def validate_source(source, where="source"):
 
 def validate_manifest(document):
     fields(document, ("schemaVersion", "name", "game", "dependencies"),
-           ("fileOverrides", "registries"), "manifest")
+           ("fileOverrides", "registries", "plugins"), "manifest")
     if type(document["schemaVersion"]) is not int or document["schemaVersion"] != 1:
         raise PackError("Unsupported manifest schemaVersion")
     nonempty(document["name"], "name")
     game = document["game"]
     fields(game, ("id", "dlc"), ("version",), "game")
-    if game["id"] != "cyberpunk2077":
-        raise PackError("Only cyberpunk2077 is supported")
+    if game["id"] not in EXECUTABLES:
+        raise PackError("Supported games: cyberpunk2077, newvegas")
+    if "plugins" in document:
+        from .newvegas import validate_plugins
+        if game["id"] != "newvegas":
+            raise PackError("plugins is only supported for New Vegas")
+        validate_plugins(document["plugins"])
     if "version" in game:
         nonempty(game["version"], "game.version")
     if not isinstance(game["dlc"], list) or any(not isinstance(x, str) or not x for x in game["dlc"]):
@@ -148,7 +154,7 @@ def local_dependency(archive: Path, manifest: Path):
     return {"source": {"type": "local-archive", "path": reference}, "integrity": "sha256:" + digest(archive)}
 
 
-def profile_sources(mo2: Path, profile: str, archive_dirs=(), github_catalog=None):
+def profile_sources(mo2: Path, profile: str, archive_dirs=(), github_catalog=None, game_id="cyberpunk2077"):
     """Read explicit provenance only. Return None for unknown, never guess by name."""
     records = json.loads(github_catalog.read_text(encoding="utf-8-sig")) if github_catalog else []
     catalog = {r["Name"].casefold(): r for r in records}
@@ -192,7 +198,7 @@ def profile_sources(mo2: Path, profile: str, archive_dirs=(), github_catalog=Non
             # An explicitly supplied source catalog identifies this installed mod.
             dependency = {"source": github_source(record["Url"]), "integrity": "sha256:" + record["SHA256"].lower()}
         elif general.get("repository", "").lower() == "nexus" and general.get("modid", "").isdigit() and int(general["modid"]) > 0:
-            source = {"type": "nexus", "game": general.get("gameName", "cyberpunk2077"), "modId": int(general["modid"])}
+            source = {"type": "nexus", "game": general.get("gameName", game_id), "modId": int(general["modid"])}
             if ini.has_section("installedFiles"):
                 section = ini["installedFiles"]
                 ids = {int(value) for key, value in section.items() if key.endswith("\\fileid") and value.isdigit() and int(value) > 0}
@@ -215,7 +221,11 @@ def export_manifest(mo2: Path, game: Path, profile: str, destination: Path,
     """Selections map each enabled mod name to its dependency, or explicit None=skip."""
     if destination.exists():
         raise PackError("Export file already exists; choose a new filename")
+    game_id = detect_game(game)
     profile_path = safe_join(mo2 / "profiles", profile)
+    plugin_snapshot = {}
+    if game_id == "newvegas":
+        plugin_snapshot = {p: digest(p) for p in (profile_path / "plugins.txt", profile_path / "loadorder.txt") if p.is_file()}
     before = digest(profile_path / "modlist.txt")
     names = active_mods(profile_path)
     missing = set(names) - selections.keys()
@@ -239,6 +249,7 @@ def export_manifest(mo2: Path, game: Path, profile: str, destination: Path,
             relative = path.relative_to(root).as_posix()
             if relative.casefold() == "meta.ini" or runtime_noise(relative):
                 continue
+            relative = game_path(game_id, relative)
             safe_relative(relative)
             key = relative.casefold()
             if key in owners:
@@ -248,14 +259,22 @@ def export_manifest(mo2: Path, game: Path, profile: str, destination: Path,
             else:
                 owners[key] = (alias, path)
     document = {"schemaVersion": 1, "name": profile,
-                "game": {"id": "cyberpunk2077", "dlc": ["phantom-liberty"] if (game / "archive/pc/ep1").is_dir() else []},
+                "game": {"id": game_id, "dlc": sorted(installed_dlcs(game_identity(game)))},
                 "dependencies": dependencies}
+    if game_id == "newvegas":
+        from .newvegas import profile_plugins
+        from .games import FNV_DLCS
+        included = {"falloutnv.esm", *(p.casefold() for p in FNV_DLCS.values())}
+        included.update(key[5:] for key in owners if key.startswith("data/"))
+        document["plugins"] = [name for name in profile_plugins(profile_path) if name.casefold() in included]
     if overrides:
         document["fileOverrides"] = [{"winner": winner, "loser": loser, "paths": sorted(paths)}
                                      for (winner, loser), paths in sorted(overrides.items())]
     validate_manifest(document)
     if digest(profile_path / "modlist.txt") != before:
         raise PackError("Profile changed during export; retry")
+    if any(not p.is_file() or digest(p) != value for p, value in plugin_snapshot.items()):
+        raise PackError("Plugin order changed during export; retry")
     write_json(destination, document)
     return {"manifest": str(destination), "dependencies": len(dependencies), "skipped": skipped,
             "notice": "Only source references and file conflict rules were exported. Local edits, overwrite/root-only files and unrecorded installer choices are not included."}

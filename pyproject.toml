@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mo2-modlists"
-version = "0.6.3"
+version = "0.7.0"
 description = "Source manifests for MO2 modlists"
 requires-python = ">=3.12"
 

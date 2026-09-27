@@ -1,6 +1,6 @@
 # Source importer acceptance
 
-Status: 2026-09-27, version 0.6.3. The specified source-manifest workflow and representative CP77/Nexus Collection acceptance checks have passed. The release remains a development preview with the scope limits below.
+Status: 2026-09-27, version 0.7.0. The specified source-manifest workflow and representative CP77/Nexus Collection acceptance checks have passed. New Vegas acceptance is tracked separately below. The release remains a development preview with the scope limits below.
 
 | Requirement | Evidence | Scope |
 | --- | --- | --- |
@@ -15,9 +15,19 @@ Status: 2026-09-27, version 0.6.3. The specified source-manifest workflow and re
 | Playable fresh profile | User confirmed ITP third-person operation; autonomous mixed-source and Collection save/load/move/crouch checks passed | Representative smoke checks, not long-duration stability tests |
 | Existing installation preserved | Stable Play hash matches September 27 baseline; deployment confined to disposable MO2/game directories | Windows Saved Games location was repaired separately after failed-drive discovery |
 
-The automated suite has 78 passing tests. Additional acceptance cases include unavailable locked assets, selected-variant output separation, source identity/hash changes, manifest/lock mismatch, native dependency omission, root restoration protection and unsupported Collection choices.
+The automated suite has 94 passing tests. Additional acceptance cases include unavailable locked assets, selected-variant output separation, source identity/hash changes, manifest/lock mismatch, native dependency omission, root restoration protection, unsupported Collection choices, New Vegas Data mounting, plugin master ordering, extended TES4 subrecords, bundled Collection directories and hash-bound external reviews.
 
 ## Live evidence
+
+### New Vegas: Gopher's Stable New Vegas revision 17
+
+The real Collection `60wuix` was converted into a finalized manifest and lock, then installed from the verified cache into `E:/Modding/FalloutNewVegas/profiles/Gopher Stable NV r17`. All 24 required entries were included; two optional ESM-repair entries were excluded. All 23 Nexus archives matched the Collection's MD5 values, with SHA-256 pins in the recipes/lock. Bundled NVTF settings, exact applicable ordering and external handoffs were reviewed explicitly. The regional executable was 4GB-patched before resolution with a separate original backup.
+
+Initial verification checked 1,543 managed files with zero differences. MO2 showed 24 active mods and 12 active plugins. All 14 NVSE DLL plugins reported successful loading, both mod ESM/ESP files appeared in runtime logs, and the existing Remix/ReShade DLSS5 addon initialized on the RTX 5080. The processes remained responsive and exited after Alt+F4. Window capture timed out twice; this is startup evidence, not a loaded-world gameplay or neural-rendering evaluation result for the Collection.
+
+First run populated the supplied ShowOff, OneTweak and Stewie INIs without changing their existing key values. The post-launch verifier correctly reports these three changed files. Cell Offset Generator's runtime Overwrite files remain preserved. Evidence is under `E:/Modding/FalloutNewVegas/modlists/60wuix`, including the manifest, lock, exact recipes/review decisions, before/after verification and startup logs. The historical DLSS-only lock still describes the pre-4GB executable and is not rewritten.
+
+### Cyberpunk 2077
 
 - `artifacts/itp-nexus-test`: Premium acquisition, exact dependency graph, install, offline reproduction and export/re-import.
 - `artifacts/mixed-itp-test`: two installations, network-blocked reproduction, initial file verification, re-export comparison and `fixed-{mods,world,moved-crouched}.png`.

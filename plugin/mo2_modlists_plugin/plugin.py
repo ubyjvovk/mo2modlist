@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QPushButton, QFileDia
                             QInputDialog, QMessageBox, QProgressDialog)
 
 from .mo2_modlists.core import PackError
+from .mo2_modlists.games import detect_game
 from .mo2_modlists.manifest import (export_manifest, profile_sources, local_dependency,
                                     source_from_url)
 
@@ -82,7 +83,7 @@ class ModlistsTool(mobase.IPluginTool, mobase.IPluginFileMapper):
         return "Export source manifests; resolve and install pinned modlists and review Nexus Collections."
 
     def version(self):
-        return mobase.VersionInfo(0, 6, 3)
+        return mobase.VersionInfo(0, 7, 0)
 
     def settings(self):
         return [mobase.PluginSetting("archive-directories", "Additional download directories, separated by semicolons", ""),
@@ -234,4 +235,4 @@ class ModlistsTool(mobase.IPluginTool, mobase.IPluginFileMapper):
                     f"{result['dependencies']} dependencies written to:\n{manifest}\n{skipped}\n\n{result['notice']}")
             self.run_job(parent, write, finished)
         self.run_job(parent, lambda report: profile_sources(root, profile, archives,
-                      Path(catalog) if catalog else None), choose_sources)
+                      Path(catalog) if catalog else None, game_id=detect_game(game)), choose_sources)

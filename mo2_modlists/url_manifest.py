@@ -14,8 +14,8 @@ def nexus_url_kind(url):
         collection_reference(url)
         return 'collection'
     source = source_from_url(url)
-    if source['type'] != 'nexus' or source['game'] != 'cyberpunk2077':
-        raise PackError('Use a Cyberpunk 2077 Nexus mod or Collection URL')
+    if source['type'] != 'nexus' or source['game'] not in ('cyberpunk2077', 'newvegas'):
+        raise PackError('Use a Cyberpunk 2077 or Fallout New Vegas Nexus mod or Collection URL')
     return 'mod'
 
 
@@ -44,7 +44,7 @@ def manifest_from_url(url, output: Path, *, name=None, cache=None, headers=None,
                 child_name += f" ({pinned['modId']}/{pinned['fileId']})"
             dependencies[child_name] = {**dependency, 'source': pinned}
         document = validate_manifest({'schemaVersion': 1, 'name': label,
-            'game': requirements.get('game', {'id': 'cyberpunk2077', 'dlc': []}),
+            'game': requirements.get('game', {'id': source['game'], 'dlc': []}),
             'dependencies': dependencies})
         write_json(output, document)
         return document

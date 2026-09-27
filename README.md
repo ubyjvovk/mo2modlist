@@ -1,10 +1,14 @@
 # MO2 Modlists
 
-Version 0.6 development preview exports **one `modlist.json`**, following [SPEC.md](SPEC.md), and implements a separate source resolver/importer. Export does not include locks, blobs or copied archives. The old installed-snapshot importer remains removed. Locks and caches are produced during resolution/import.
+Version 0.7 development preview supports Cyberpunk 2077 and Fallout: New Vegas. It exports **one `modlist.json`**, following [SPEC.md](SPEC.md), and implements a separate source resolver/importer. Export does not include locks, blobs or copied archives. The old installed-snapshot importer remains removed. Locks and caches are produced during resolution/import.
 
 ## Create a manifest from a Nexus URL
 
-In MO2 choose **Create manifest from Nexus URL…** and paste a Cyberpunk mod or Collection URL. Mod conversion pins the selected mod and its immediate requirements to exact Nexus file IDs. Transitive requirements are expanded during resolution, not flattened into this manifest. An ambiguous file choice requires selection. Metadata needs the optional Nexus API credential; unknown requirements do not produce a silently incomplete manifest. Collection URLs use the existing full-package conversion and review workflow.
+In MO2 choose **Create manifest from Nexus URL…** and paste a Cyberpunk or New Vegas mod or Collection URL. Mod conversion pins the selected mod and its immediate requirements to exact Nexus file IDs. Transitive requirements are expanded during resolution, not flattened into this manifest. An ambiguous file choice requires selection. Metadata needs the optional Nexus API credential; unknown requirements do not produce a silently incomplete manifest. Collection URLs use the existing full-package conversion and review workflow.
+
+New Vegas uses game-relative `Data/...` recipe paths, mounted at the Data directory by MO2. Root loaders and wrapped or ambiguous archives require explicit recipes. Active ESM/ESP order is recorded separately from asset priorities; TES4 master dependencies are checked before installation. Automatic ordering satisfies declared masters only and does not replace LOOT or compatibility review. The executable hash, distribution and installed DLC are bound to each lock, so apply an external 4GB patch before resolution. Regional language plugins must be supplied explicitly if needed; they are not silently imported from unmanaged game files.
+
+Collection conversion supports bundled directories and hash-bound review records for external steps or obsolete rules. Unhandled entries still block finalization. Patching executables, installing runtimes and configuring profile INIs are external handoffs, not automatic installer actions; record completion before acknowledging their prerequisites.
 
 ```powershell
 .\.venv\Scripts\python.exe -m mo2_modlists.cli from-url 'https://www.nexusmods.com/cyberpunk2077/mods/32203' --output modlist.json

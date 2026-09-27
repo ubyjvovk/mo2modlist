@@ -79,19 +79,21 @@ def files(root: Path):
                 yield path
 
 
-def game_running() -> bool:
+def game_running(game=None) -> bool:
     if os.name != "nt":
         return False
-    result = subprocess.run(["tasklist", "/FI", "IMAGENAME eq Cyberpunk2077.exe", "/FO", "CSV", "/NH"],
+    from .games import EXECUTABLES, detect_game
+    image = Path(EXECUTABLES[detect_game(game)]).name if game is not None else "Cyberpunk2077.exe"
+    result = subprocess.run(["tasklist", "/FI", "IMAGENAME eq " + image, "/FO", "CSV", "/NH"],
                             capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
     if result.returncode:
         raise PackError("Could not check running game processes")
-    return '"cyberpunk2077.exe"' in result.stdout.lower()
+    return ('"' + image.lower() + '"') in result.stdout.lower()
 
 
-def require_game_closed():
-    if game_running():
-        raise PackError("Close Cyberpunk before snapshotting or installing; its configuration files may be changing.")
+def require_game_closed(game=None):
+    if game_running(game):
+        raise PackError("Close the target game before snapshotting or installing; its configuration files may be changing.")
 
 
 def read_ini(path: Path):
@@ -126,9 +128,14 @@ def vanilla_paths(game: Path) -> set[str]:
 
 
 def game_identity(game: Path):
-    exe = game / "bin/x64/Cyberpunk2077.exe"
-    if not exe.is_file():
-        raise PackError(f"Cyberpunk executable missing in {game}")
+    from .games import detect_game, EXECUTABLES, FNV_DLCS
+    game_id = detect_game(game)
+    exe = game / EXECUTABLES[game_id]
+    if game_id == "newvegas":
+        names = {p.name.casefold() for p in (game / "Data").iterdir()} if (game / "Data").is_dir() else set()
+        return {"id": game_id, "executableSha256": digest(exe),
+                "distribution": "steam" if (game / "steam_api.dll").is_file() else "unknown",
+                "dlc": sorted(key for key, value in FNV_DLCS.items() if value.casefold() in names)}
     info_path = game / "goggame-1423049311.info"
     info = json.loads(info_path.read_text()) if info_path.exists() else {}
     return {"id": "cyberpunk2077", "executableSha256": digest(exe),

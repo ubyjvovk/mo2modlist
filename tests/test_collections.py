@@ -9,6 +9,43 @@ from mo2_modlists.collections import collection_reference, convert_collection, r
 
 
 class CollectionTests(unittest.TestCase):
+    def test_bundled_directory_becomes_reproducible_archive(self):
+        from mo2_modlists.collections import bundled_dependency
+        from mo2_modlists.core import digest
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "pack.zip"
+            with zipfile.ZipFile(archive, "w") as output:
+                output.writestr("collection.json", json.dumps(self.fixture()))
+                output.writestr("bundled/Settings (v1)/NVSE/Plugins/NVTF.ini", "[Main]\nx=1\n")
+            mod = {"source": {"fileExpression": "Settings (v1)"}}
+            first = bundled_dependency(archive, mod, root / "cache")
+            second = bundled_dependency(archive, mod, root / "cache")
+            self.assertEqual(first, second)
+            path = Path(first["source"]["path"])
+            self.assertEqual(first["integrity"], "sha256:" + digest(path))
+            with zipfile.ZipFile(path) as output:
+                self.assertEqual(output.namelist(), ["NVSE/Plugins/NVTF.ini"])
+
+    def test_reviewed_external_handoff_is_bound_to_original_document(self):
+        from mo2_modlists.core import json_digest
+        document = self.fixture()
+        document["tools"] = [{"name": "Optional tool", "exe": "tool.exe"}]
+        decision = {"_collection": {"reviews": {"tools": {"collectionSha256": json_digest(document),
+            "sha256": json_digest(document["tools"]), "note": "Excluded optional tool; do not execute."}}}}
+        draft = convert_collection(document, decisions=decision)
+        self.assertTrue(draft["complete"])
+        self.assertIn("tools", draft["manifest"]["extensions"]["nexusCollection"]["reviewedHandoffs"])
+        document["tools"][0]["exe"] = "changed.exe"
+        self.assertFalse(convert_collection(document, decisions=decision)["complete"])
+
+    def test_file_expression_requires_strong_identity(self):
+        from mo2_modlists.collections import match_reference
+        mod = self.fixture()["mods"][0]
+        mod["source"].update(md5="a" * 32, logicalFilename="Base")
+        self.assertEqual(match_reference({"fileExpression": "Base-*", "fileMD5": "a" * 32}, {"base": mod}), "base")
+        self.assertIsNone(match_reference({"fileExpression": "Base-*", "logicalFileName": "Base"}, {"base": mod}))
+
     def fixture(self):
         return {"info": {"name": "CP77 fixture", "domainName": "cyberpunk2077"}, "mods": [
             {"name": "Base", "version": "1", "optional": False, "domainName": "cyberpunk2077",

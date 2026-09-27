@@ -15,6 +15,7 @@ from .core import (PackError, digest, files, game_identity, json_digest, require
                    runtime_noise, safe_join, safe_relative, write_json)
 from .manifest import validate_manifest, validate_source
 from .sources import stream_member
+from .games import ADAPTERS, executable, overlay_path, game_path, nexus_dlcs
 
 
 def mod_label(value):
@@ -80,14 +81,21 @@ def _validate_lock(lock, manifest):
         raise PackError("Expected a finalized source-installation lock")
     if lock.get("manifestSha256") != json_digest(manifest):
         raise PackError("Manifest differs from lock; explicitly re-resolve before installing")
-    if lock.get("adapterVersion") != "cp77-1":
+    if lock.get("adapterVersion") != ADAPTERS[manifest["game"]["id"]]:
         raise PackError("Unsupported game adapter in lock")
     game = lock.get("game")
     if (not isinstance(game, dict) or game.get("id") != manifest["game"]["id"]
         or not isinstance(game.get("executableSha256"), str)
         or not re.fullmatch(r"[0-9a-f]{64}", game["executableSha256"])
-        or not isinstance(game.get("distribution"), str) or type(game.get("phantomLiberty")) is not bool):
+        or not isinstance(game.get("distribution"), str)
+        or (game["id"] == "cyberpunk2077" and type(game.get("phantomLiberty")) is not bool)
+        or (game["id"] == "newvegas" and (not isinstance(game.get("dlc"), list) or any(not isinstance(d, str) for d in game["dlc"])))):
         raise PackError("Invalid locked game identity")
+    if game["id"] == "newvegas":
+        from .newvegas import validate_plugins
+        validate_plugins(lock.get("plugins"))
+        if "plugins" in manifest and lock["plugins"] != manifest["plugins"]:
+            raise PackError("Locked plugin order differs from manifest")
     prerequisites = lock.get("externalPrerequisites", [])
     if not isinstance(prerequisites, list):
         raise PackError("Invalid external prerequisites")
@@ -153,6 +161,8 @@ def _validate_lock(lock, manifest):
             or type(artifact.get("size")) is not int or artifact["size"] < 0):
             raise PackError("Invalid locked artifact digest/size")
         source = artifact["source"]
+        if source.get("type") == "nexus" and source.get("game") != game["id"]:
+            raise PackError("Locked Nexus source belongs to a different game")
         if source["type"] == "nexus" and "fileId" not in source:
             raise PackError("Lock requires exact Nexus file identity")
         if source["type"] == "github-release" and ("tag" not in source or any(type(artifact.get(k)) is not int for k in ("releaseId", "assetId"))):
@@ -194,8 +204,7 @@ def _validate_lock(lock, manifest):
                     if definition not in selections or candidate == selections[definition]]
                 if not any(matches_dependency({"source": candidate}, target) for candidate in eligible):
                     raise PackError("Locked edge does not satisfy its native dependency: " + alias)
-            installed_dlcs = {key for key, present in (("1", game["phantomLiberty"]),
-                ("2", game.get("redmod", False))) if present}
+            installed_dlcs = nexus_dlcs(game)
             for definition in native["raw"]["dlc_dependency_definitions"]:
                 if not any(target["dlc_id"] in installed_dlcs for target in definition["dlc_targets"]):
                     raise PackError("Locked game does not satisfy a native DLC requirement")
@@ -211,6 +220,8 @@ def _validate_lock(lock, manifest):
         for entry in package["outputs"]:
             safe_relative(entry["path"])
             safe_relative(entry["member"])
+            if entry["class"] == "mo2-overlay":
+                overlay_path(game["id"], entry["path"])
             if entry["path"].casefold() in ("meta.ini", "modlists-source.json"):
                 raise PackError("Archive output collides with MO2 management metadata")
             if type(entry.get("size")) is not int or entry["size"] < 0:
@@ -260,7 +271,7 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
         from .acquisition import InputRequired
         raise InputRequired("external-prerequisites", "Complete and acknowledge the external instructions for this target before installing",
                             requirements=lock["externalPrerequisites"])
-    require_game_closed()
+    require_game_closed(game)
     mo2, game = mo2.resolve(), game.resolve()
     profile = safe_join(mo2, "profiles/" + profile_name)
     if "/" in safe_relative(profile_name):
@@ -270,10 +281,10 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
         identity["redmod"] = (game / "tools/redmod/bin/redMod.exe").is_file()
     if "version" in lock["game"]:
         from .windows_version import product_version
-        identity["version"] = product_version(game / "bin/x64/Cyberpunk2077.exe")
+        identity["version"] = product_version(executable(game))
     if "fixedProductVersion" in lock["game"]:
         from .windows_version import product_version
-        identity["fixedProductVersion"] = product_version(game / "bin/x64/Cyberpunk2077.exe", fixed=True)
+        identity["fixedProductVersion"] = product_version(executable(game), fixed=True)
     if identity != lock["game"]:
         raise PackError("Target game executable/build/distribution/DLC differs from the resolved lock")
     packages = lock["packages"]
@@ -287,7 +298,7 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
         raise PackError("Review and allow physical game-root deployment; it affects every profile using this game")
     for file in files(mo2 / "overwrite"):
         path = file.relative_to(mo2 / "overwrite").as_posix()
-        if not runtime_noise(path) and digest(file) != effective.get(path.casefold()):
+        if not runtime_noise(path) and digest(file) != effective.get(game_path(identity["id"], path).casefold()):
             raise PackError(f"Existing overwrite conflicts with this import: {path}")
     operation_id = json_digest({"lock": lock, "profile": profile_name, "game": str(game)})[:20]
     operation = safe_join(mo2, ".modlists/" + operation_id)
@@ -308,10 +319,14 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                 names = [journal["mods"][key] for key in lock["priority"]]
                 expected_profile = "# MO2 Modlists: highest priority first\n" + "".join("+" + name + "\n" for name in names)
                 if published == lock and (profile / "modlist.txt").read_text(encoding="utf-8") == expected_profile:
+                    if identity["id"] == "newvegas":
+                        from .newvegas import profile_plugins
+                        if profile_plugins(profile) != lock["plugins"]:
+                            raise PackError("Published plugin order changed after interruption")
                     for key, name in zip(lock["priority"], names):
                         for entry in packages[key]["outputs"]:
                             base = game if entry["class"] == "game-root" else mo2 / "mods" / name
-                            target = safe_join(base, entry["path"])
+                            target = safe_join(base, entry["path"] if entry["class"] == "game-root" else overlay_path(identity["id"], entry["path"]))
                             expected = effective[entry["path"].casefold()] if entry["class"] == "game-root" else entry["sha256"]
                             if not target.is_file() or digest(target) != expected:
                                 raise PackError("Published installation changed after interruption; inspect it before recovery")
@@ -339,7 +354,7 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                 archive = store.path(artifact["sha256"])
                 from .planning import outputs_for, selected_recipe
                 selected, _ = selected_recipe(package["recipe"]["document"], package["options"])
-                expected_outputs = outputs_for(archive, selected.get("mappings"), progress, hash_contents=False)
+                expected_outputs = outputs_for(archive, selected.get("mappings"), progress, hash_contents=False, game_id=identity["id"])
                 locked_outputs = [{field: entry[field] for field in ("member", "path", "class", "size")} for entry in package["outputs"]]
                 if sorted(expected_outputs, key=lambda entry: entry["path"].casefold()) != sorted(locked_outputs, key=lambda entry: entry["path"].casefold()):
                     raise PackError("Locked output mappings differ from the recipe and archive inventory")
@@ -370,7 +385,7 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                 for entry in package["outputs"]:
                     if entry["class"] != "mo2-overlay":
                         continue
-                    target = safe_join(destination, entry["path"])
+                    target = safe_join(destination, overlay_path(identity["id"], entry["path"]))
                     if target.exists():
                         if digest(target) != entry["sha256"]:
                             raise PackError("Previously staged mod was modified; refusing to replace it")
@@ -385,9 +400,13 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                      "recipeReference": package.get("recipeReference")})
                 (destination / "meta.ini").write_text("[General]\nnotes=Installed from a pinned source manifest\n", encoding="utf-8")
                 failure_hook("mod-staged")
+            if identity["id"] == "newvegas":
+                from .newvegas import resolve_plugins
+                if resolve_plugins(document, lock, store, game) != lock["plugins"]:
+                    raise PackError("Plugin order differs from the resolved archive/master plan")
             journal["status"] = "deploying"
             checkpoint()
-            require_game_closed()
+            require_game_closed(game)
             for canonical, (key, entry) in root_files.items():
                 target = safe_join(game, entry["path"])
                 if target.is_file() and digest(target) == entry["sha256"]:
@@ -414,6 +433,9 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
             stage_profile.mkdir(exist_ok=True)
             (stage_profile / "modlist.txt").write_text("# MO2 Modlists: highest priority first\n" + "".join("+" + name + "\n" for name in names), encoding="utf-8")
             (stage_profile / "settings.ini").write_text("[General]\nLocalSaves=false\nLocalSettings=false\n", encoding="utf-8")
+            if identity["id"] == "newvegas":
+                from .newvegas import write_plugins
+                write_plugins(stage_profile, lock["plugins"])
             write_json(stage_profile / "modlist.lock.json", lock)
             failure_hook("before-profile")
             profile.parent.mkdir(parents=True, exist_ok=True)

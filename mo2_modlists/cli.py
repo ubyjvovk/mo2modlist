@@ -71,7 +71,8 @@ def main():
                 headers=headers("nexus"), decisions=decisions, progress=progress)
             result = {"manifest": str(args.output), "dependencies": len(document["dependencies"])}
         elif args.command == "export":
-            candidates = profile_sources(args.mo2, args.profile, [args.mo2 / "downloads"] + args.archives, args.github_manifest)
+            from .games import detect_game
+            candidates = profile_sources(args.mo2, args.profile, [args.mo2 / "downloads"] + args.archives, args.github_manifest, game_id=detect_game(args.game))
             choices = json.loads(args.choices.read_text(encoding="utf-8-sig")) if args.choices else {}
             selections = {item["name"]: item["dependency"] for item in candidates if item["dependency"] is not None}
             selections.update(choices)

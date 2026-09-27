@@ -293,7 +293,7 @@ from pathlib import Path
 from mo2_modlists.acquisition import ArtifactStore
 from mo2_modlists.install import import_lock
 import mo2_modlists.core as core
-core.game_running = lambda: False
+core.game_running = lambda game=None: False
 root = Path(sys.argv[1])
 def fail(phase):
     if phase == "root-written": os._exit(17)

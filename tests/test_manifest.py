@@ -14,6 +14,8 @@ class ManifestTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.mo2, self.game = self.root / "mo2", self.root / "game"
+        (self.game / "bin/x64").mkdir(parents=True)
+        (self.game / "bin/x64/Cyberpunk2077.exe").write_bytes(b"game")
         (self.mo2 / "profiles/Play").mkdir(parents=True)
         (self.mo2 / "profiles/Play/modlist.txt").write_text("+Patch\n+Base\n+Unknown\n-Disabled\n")
         for name in ("Patch", "Base", "Unknown"):

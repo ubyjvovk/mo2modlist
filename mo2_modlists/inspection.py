@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .core import active_mods, digest, files, game_identity, safe_join
 from .install import validate_lock
+from .games import executable, overlay_path
 
 
 def inspect_lock(manifest_path, lock_path):
@@ -18,7 +19,8 @@ def inspect_lock(manifest_path, lock_path):
             for key in lock["priority"]], "dependencyEdges": lock["dependencyEdges"],
         "physicalGameFiles": sorted({entry["path"] for package in lock["packages"].values()
             for entry in package["outputs"] if entry["class"] == "game-root"}),
-        "externalPrerequisites": lock["externalPrerequisites"], "registries": lock["registries"]}
+        "externalPrerequisites": lock["externalPrerequisites"], "registries": lock["registries"],
+        **({"plugins": lock["plugins"]} if "plugins" in lock else {})}
 
 
 def verify_installation(manifest_path, lock_path, mo2, game, profile_name):
@@ -35,12 +37,16 @@ def verify_installation(manifest_path, lock_path, mo2, game, profile_name):
         identity["redmod"] = (game / "tools/redmod/bin/redMod.exe").is_file()
     if "version" in lock["game"]:
         from .windows_version import product_version
-        identity["version"] = product_version(game / "bin/x64/Cyberpunk2077.exe")
+        identity["version"] = product_version(executable(game))
     if "fixedProductVersion" in lock["game"]:
         from .windows_version import product_version
-        identity["fixedProductVersion"] = product_version(game / "bin/x64/Cyberpunk2077.exe", fixed=True)
+        identity["fixedProductVersion"] = product_version(executable(game), fixed=True)
     if identity != lock["game"]:
         differences.append({"kind": "game-identity"})
+    if identity["id"] == "newvegas":
+        from .newvegas import profile_plugins
+        if profile_plugins(profile) != lock["plugins"]:
+            differences.append({"kind": "plugin-order"})
     names = active_mods(profile)
     if len(names) != len(lock["priority"]):
         differences.append({"kind": "enabled-mod-count", "expected": len(lock["priority"]), "actual": len(names)})
@@ -64,8 +70,9 @@ def verify_installation(manifest_path, lock_path, mo2, game, profile_name):
         expected_paths = set()
         for entry in package["outputs"]:
             if entry["class"] == "mo2-overlay":
-                expected_paths.add(entry["path"].casefold())
-                check(mod, entry)
+                relative = overlay_path(identity["id"], entry["path"])
+                expected_paths.add(relative.casefold())
+                check(mod, {**entry, "path": relative})
             else:
                 root_outputs.setdefault(entry["path"].casefold(), entry)
         for path in files(mod):

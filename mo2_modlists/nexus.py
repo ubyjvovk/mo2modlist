@@ -178,7 +178,11 @@ class NexusProvider:
         dlcs = []
         for item in requirements['dlcRequirements']:
             name = item['gameExpansion']['name']
-            mapped = {'Phantom Liberty': '1', 'REDmod': '2'}.get(name)
+            import html
+            names = ({'Phantom Liberty': '1', 'REDmod': '2'} if source['game'] == 'cyberpunk2077' else
+                     {'Dead Money': '1', 'Honest Hearts': '2', 'Old World Blues': '3', 'Lonesome Road': '4',
+                      "Gun Runners' Arsenal": '5', "Courier's Stash": '6'} if source['game'] == 'newvegas' else {})
+            mapped = names.get(html.unescape(name))
             if mapped is None:
                 raise InputRequired('nexus-dlc', 'Unknown legacy DLC requirement', name=name)
             dlcs.append({'dlc_targets': [{'dlc_id': mapped}]})
@@ -219,12 +223,13 @@ def recipe_from_metadata(metadata, sha256, *, ask=None, selections=None, known_o
     recipe = {"schemaVersion": 1, "component": f"nexus:{source['game']}:lineage:{version['file']['id']}",
         "version": version["version"], "revision": "nexus-v3-1", "artifact": "sha256:" + sha256, "dependencies": {}}
     # Verified against Nexus /v3/games/cyberpunk2077/dlcs on 2026-09-26.
-    dlc_mapping = {"1": "phantom-liberty", "2": "redmod"}
+    from .games import NEXUS_DLCS
+    dlc_mapping = NEXUS_DLCS.get(source["game"], {})
     required_dlcs = set()
     for definition in metadata["raw"]["dlc_dependency_definitions"]:
         candidates = sorted({dlc_mapping[target["dlc_id"]] for target in definition["dlc_targets"] if target["dlc_id"] in dlc_mapping})
         if not candidates:
-            raise InputRequired("nexus-dlc", "This Nexus DLC is not mapped by the CP77 adapter", definition=definition)
+            raise InputRequired("nexus-dlc", "This Nexus DLC is not mapped by the game adapter", definition=definition)
         if len(candidates) == 1:
             chosen = candidates[0]
         else:
@@ -236,7 +241,7 @@ def recipe_from_metadata(metadata, sha256, *, ask=None, selections=None, known_o
                 raise PackError("Invalid DLC alternative")
         required_dlcs.add(chosen)
     if required_dlcs:
-        recipe["game"] = {"id": "cyberpunk2077", "dlc": sorted(required_dlcs)}
+        recipe["game"] = {"id": source["game"], "dlc": sorted(required_dlcs)}
     for definition_id, candidates in candidate_groups(metadata):
         if selections is not None:
             selected = next((item for item in candidates if item[2] == selections.get(definition_id)), None)
