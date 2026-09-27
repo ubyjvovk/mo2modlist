@@ -94,7 +94,7 @@ class CandidateProvider(AbstractProvider):
             raise InputRequired("dependency-metadata", "Candidate dependency metadata is unknown; provide a recipe", source=source, chain=reason)
         result = [self.pin(required, chain) for required, chain in (extra or [])]
         definitions = {}
-        if metadata["complete"]:
+        if metadata["complete"] or metadata["materialized"]["dependencies"]:
             for definition_id, choices in candidate_groups(metadata, allow_empty=True):
                 if not choices:
                     return self.impossible(candidate, reason + ["empty Nexus dependency " + definition_id])

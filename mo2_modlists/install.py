@@ -177,7 +177,7 @@ def _validate_lock(lock, manifest):
         if options != package["options"]:
             raise PackError("Lock must record every selected recipe option")
         native = package.get("nativeMetadata")
-        if native and native.get("complete"):
+        if native:
             from .nexus import candidate_groups
             if native["source"] != source:
                 raise PackError("Native metadata belongs to a different locked source")
@@ -271,6 +271,9 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
     if "version" in lock["game"]:
         from .windows_version import product_version
         identity["version"] = product_version(game / "bin/x64/Cyberpunk2077.exe")
+    if "fixedProductVersion" in lock["game"]:
+        from .windows_version import product_version
+        identity["fixedProductVersion"] = product_version(game / "bin/x64/Cyberpunk2077.exe", fixed=True)
     if identity != lock["game"]:
         raise PackError("Target game executable/build/distribution/DLC differs from the resolved lock")
     packages = lock["packages"]

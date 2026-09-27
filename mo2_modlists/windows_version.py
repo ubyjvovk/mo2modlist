@@ -4,7 +4,7 @@ from ctypes import wintypes
 import os
 
 
-def product_version(path):
+def product_version(path, *, fixed=False):
     if os.name != "nt":
         return None
     api = ctypes.WinDLL("version", use_last_error=True)
@@ -19,6 +19,14 @@ def product_version(path):
     if not api.GetFileVersionInfoW(str(path), 0, size, data):
         return None
     pointer, length = ctypes.c_void_p(), wintypes.UINT()
+    if fixed:
+        if not api.VerQueryValueW(data, "\\", ctypes.byref(pointer), ctypes.byref(length)) or length.value < 52:
+            return None
+        info = ctypes.cast(pointer, ctypes.POINTER(wintypes.DWORD))
+        if info[0] != 0xFEEF04BD:
+            return None
+        major_minor, build_revision = info[4], info[5]
+        return f"{major_minor >> 16}.{major_minor & 0xffff}.{build_revision >> 16}.{build_revision & 0xffff}"
     if not api.VerQueryValueW(data, "\\VarFileInfo\\Translation", ctypes.byref(pointer), ctypes.byref(length)):
         return None
     translations = ctypes.cast(pointer, ctypes.POINTER(wintypes.WORD))

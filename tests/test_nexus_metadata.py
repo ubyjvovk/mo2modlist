@@ -81,7 +81,10 @@ class NexusMetadataTests(unittest.TestCase):
         self.assertEqual(recipe['dependencies']['nexus-definition-legacy-11']['source']['fileId'],21)
         self.assertEqual(recipe['game']['dlc'],['phantom-liberty'])
         snapshot['modRequirements']['nexusRequirements']['nodes'][0]['notes']='Optional'
-        with self.assertRaises(InputRequired): provider.metadata(source)
+        partial = provider.metadata(source)
+        self.assertFalse(partial['complete'])
+        self.assertEqual(partial['unresolvedRequirements'][0]['reason'], 'conditional')
+        with self.assertRaises(InputRequired): recipe_from_metadata(partial, 'a'*64)
         snapshot['modRequirements']['nexusRequirements']['nodes'][0]['notes']='Required'
         snapshot['modRequirements']['nexusRequirements']['totalCount']=2
         with self.assertRaisesRegex(PackError,'truncated'): provider.metadata(source)

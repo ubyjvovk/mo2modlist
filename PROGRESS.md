@@ -1,5 +1,13 @@
 # Progress: 2026-09-26
 
+## Collection review pipeline fixes — 2026-09-27
+
+- Conditional and external legacy requirements now produce incomplete metadata with explicit unresolved entries, allowing the existing recipe-selection workflow to run. Previously the adapter raised before a recipe could be supplied. Known mandatory native requirements and DLC remain enforced by the solver, planning and lock validation, even with incomplete metadata and a reviewed local recipe. Regression coverage checks the prompt, successful review and rejection of missing known edges.
+- Explicit root recipes are registered before recursive traversal, so references to a later root reuse its selected recipe instead of prompting again. This was encountered with Virtual Atelier referencing Browser Extension, both included in the real Collection.
+- The installed executable's actual Windows resources expose string ProductVersion `2.31` and fixed numeric ProductVersion `2.3.1.0`. Both exact observed values now satisfy game-version constraints; there is no string-normalization guess. New locks retain the fixed value alongside the string, and installation/verification recheck it. Regression coverage rejects an unobserved `2.3.2.0`.
+- Reviewed the Collection's three conditional requirements by including the exact optional dependencies already selected by the Collection (Virtual Atelier -> Browser Extension, Browser Extension -> Mod Settings, No Intro redscript variant -> redscript). Separate review decisions and archive-bound recipes are under `artifacts/live-collection-20260927`; original generated manifest remains intact.
+- Retrying the real Collection now reaches a solver conflict between Virtual Atelier's legacy ArchiveXL candidates and the Collection's explicitly pinned older ArchiveXL. Current legacy enumeration uses active versions only. No pins were silently updated, no Collection lock finalized and no profiles changed in this turn. Next: support explicitly pinned eligible historical versions for unversioned legacy requirements while preserving genuine native version ranges. All 75 tests pass.
+
 ## 0.6.1 — Premium downloads and real ITP import acceptance
 
 - User enabled Nexus Premium; the configured key now reports `is_premium: true`. Added the supported exact-file Premium API downloader to CLI resolution/import, retaining the website/archive handoff for non-Premium users. Signed URLs are not saved as source metadata, and API credentials are not forwarded to CDN transfers. Live Native Settings URLs contained spaces; path encoding now preserves existing escapes and signed query bytes.

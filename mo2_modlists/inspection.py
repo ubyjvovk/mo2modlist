@@ -36,6 +36,9 @@ def verify_installation(manifest_path, lock_path, mo2, game, profile_name):
     if "version" in lock["game"]:
         from .windows_version import product_version
         identity["version"] = product_version(game / "bin/x64/Cyberpunk2077.exe")
+    if "fixedProductVersion" in lock["game"]:
+        from .windows_version import product_version
+        identity["fixedProductVersion"] = product_version(game / "bin/x64/Cyberpunk2077.exe", fixed=True)
     if identity != lock["game"]:
         differences.append({"kind": "game-identity"})
     names = active_mods(profile)

@@ -135,14 +135,16 @@ class NexusProvider:
         page = requirements['nexusRequirements']
         if len(page['nodes']) != page['totalCount']:
             raise PackError('Nexus returned a truncated requirements list')
-        normalized = []
+        normalized, unresolved = [], []
         for item in page['nodes']:
             if item['externalRequirement'] or item['gameId'] != legacy['gameId']:
-                raise InputRequired('dependency-metadata', 'External or foreign-game requirement needs a recipe', source=source)
+                unresolved.append({'reason': 'external-or-foreign-game', 'requirement': item})
+                continue
             # Conditional/optional prose cannot safely be promoted to a hard edge.
             import re
-            if re.search(r'\b(optional|recommend|only|either|instead)\b', item.get('notes') or '', re.I):
-                raise InputRequired('dependency-metadata', 'Conditional legacy requirements need a reviewed recipe', source=source, requirement=item)
+            if re.search(r'\b(optional|recommend(?:ed|ation)?|only|either|instead)\b', item.get('notes') or '', re.I):
+                unresolved.append({'reason': 'conditional', 'requirement': item})
+                continue
             required = {'type': 'nexus', 'game': source['game'], 'modId': int(item['modId'])}
             grouped = {}
             for candidate in self.current_versions(required):
@@ -157,7 +159,7 @@ class NexusProvider:
             if mapped is None:
                 raise InputRequired('nexus-dlc', 'Unknown legacy DLC requirement', name=name)
             dlcs.append({'dlc_targets': [{'dlc_id': mapped}]})
-        result.update(complete=True, provenance='nexus-legacy-page-requirements',
+        result.update(complete=not unresolved, unresolvedRequirements=unresolved, provenance='nexus-legacy-page-requirements',
             raw={'dependency_definitions': [{'id': d['id']} for d in normalized], 'dlc_dependency_definitions': dlcs},
             materialized={'dependencies': normalized})
         return result
@@ -183,8 +185,8 @@ def candidate_groups(metadata, *, allow_empty=False):
         yield str(definition["id"]), candidates
 
 
-def recipe_from_metadata(metadata, sha256, *, ask=None, selections=None):
-    if not metadata["complete"]:
+def recipe_from_metadata(metadata, sha256, *, ask=None, selections=None, known_only=False):
+    if not metadata["complete"] and not known_only:
         raise InputRequired("dependency-metadata", "Nexus file metadata is empty and legacy page requirements are unknown; supply a recipe", source=metadata["source"])
     version, source = metadata["version"], metadata["source"]
     recipe = {"schemaVersion": 1, "component": f"nexus:{source['game']}:lineage:{version['file']['id']}",

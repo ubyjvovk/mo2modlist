@@ -264,8 +264,12 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
     identity = game_identity(game)
     from .windows_version import product_version
     observed_version = product_version(game / "bin/x64/Cyberpunk2077.exe")
+    fixed_version = product_version(game / "bin/x64/Cyberpunk2077.exe", fixed=True)
+    observed_versions = {value for value in (observed_version, fixed_version) if value}
     if observed_version:
         identity["version"] = observed_version
+    if fixed_version:
+        identity["fixedProductVersion"] = fixed_version
     identity["redmod"] = (game / "tools/redmod/bin/redMod.exe").is_file()
     def has_dlc(dlc):
         return identity["phantomLiberty"] if dlc == "phantom-liberty" else identity["redmod"] if dlc == "redmod" else False
@@ -274,7 +278,7 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
             raise PackError(f"Required DLC is unavailable: {dlc}")
     if document["game"].get("version"):
         version = observed_version
-        if version != document["game"]["version"]:
+        if document["game"]["version"] not in observed_versions:
             raise PackError(f"Game version differs: required {document['game']['version']}, found {version}")
         identity["version"] = version
     packages, components, aliases, edges, active = {}, {}, {}, [], {}
@@ -287,6 +291,13 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
         return json_digest(source)
 
     prepared_recipes, prepared_provenance, preparing = {}, {}, set()
+    # A root's explicit recipe also serves references encountered before that
+    # root's alias is traversed (for example a reviewed optional dependency).
+    for dependency in document["dependencies"].values():
+        if "recipe" in dependency:
+            key = source_identity(dependency["source"], manifest_path)
+            prepared_recipes.setdefault(key, {"recipe": reference_path(dependency["recipe"], manifest_path).as_posix(),
+                                              "options": dependency.get("options", {})})
     native_solution = None
     if store.nexus_metadata is not None:
         from .candidates import solve_nexus
@@ -312,7 +323,8 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
                     dependency["recipe"] = supplement["path"].as_posix()
                     prepared_provenance[source_key] = supplement
                 else:
-                    request = InputRequired("dependency-metadata", "Required dependency metadata is unknown; provide a recipe with an explicit dependency list", source=source, chain=chain)
+                    request = InputRequired("dependency-metadata", "Required dependency metadata needs review; provide a recipe with an explicit dependency list", source=source, chain=chain,
+                                            unresolvedRequirements=metadata.get("unresolvedRequirements", []) if native else [])
                     if ask is None:
                         raise request
                     dependency["recipe"] = ask(request.request)
@@ -383,11 +395,11 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
         recipe_path = reference_path(dependency["recipe"], declaring)
         recipe = load_recipe(recipe_path)
         selected, options = selected_recipe(recipe, dependency.get("options", {}), ask)
-        if native and native["complete"] and acquired is None:
+        if native and acquired is None:
             from .nexus import recipe_from_metadata
             # Preserve native requirements alongside local installation recipes.
             # Supplemental metadata cannot silently delete provider constraints.
-            native_requirements = recipe_from_metadata(native, recipe["artifact"].removeprefix("sha256:"), ask=ask, selections=native_selections)
+            native_requirements = recipe_from_metadata(native, recipe["artifact"].removeprefix("sha256:"), ask=ask, selections=native_selections, known_only=True)
             for alias, required in native_requirements["dependencies"].items():
                 selected["dependencies"]["native-" + alias] = required
             for dlc in native_requirements.get("game", {}).get("dlc", []):
@@ -396,7 +408,7 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
         if "game" in selected:
             constraint_game = selected["game"]
             validate_manifest({"schemaVersion": 1, "name": "recipe game", "game": constraint_game, "dependencies": {}})
-            if constraint_game.get("version") and constraint_game["version"] != observed_version:
+            if constraint_game.get("version") and constraint_game["version"] not in observed_versions:
                 raise PackError("Recipe game version constraint failed: " + " -> ".join(chain))
             if any(not has_dlc(dlc) for dlc in constraint_game["dlc"]):
                 raise PackError("Recipe DLC constraint failed: " + " -> ".join(chain))

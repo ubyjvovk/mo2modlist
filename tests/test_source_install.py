@@ -45,6 +45,22 @@ class SourceInstallTests(unittest.TestCase):
         recipe_path.write_text(json.dumps(recipe))
         return {"source": {"type": "local-archive", "path": archive.name}, "recipe": recipe_path.name}
 
+    def test_exact_game_version_accepts_only_observed_resource_values(self):
+        dep = self.dependency("mod", {"r6/scripts/test.reds": b"test"})
+        document = {"schemaVersion": 1, "name": "Version", "game": {"id": "cyberpunk2077", "dlc": [], "version": "2.3.1.0"},
+                    "dependencies": {"mod": dep}}
+        with patch("mo2_modlists.windows_version.product_version", side_effect=lambda path, fixed=False: "2.3.1.0" if fixed else "2.31"):
+            self.manifest.write_text(json.dumps(document))
+            lock = resolve_manifest(self.manifest, self.store, self.game, self.lock)
+            self.assertEqual(lock["game"]["version"], "2.31")
+            self.assertEqual(lock["game"]["fixedProductVersion"], "2.3.1.0")
+            import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "Version")
+            self.lock.unlink()
+            document["game"]["version"] = "2.3.2.0"
+            self.manifest.write_text(json.dumps(document))
+            with self.assertRaisesRegex(PackError, "Game version differs"):
+                resolve_manifest(self.manifest, self.store, self.game, self.lock)
+
     def resolve(self, dependencies, overrides=None):
         manifest = {"schemaVersion": 1, "name": "Fixture", "game": {"id": "cyberpunk2077", "dlc": []}, "dependencies": dependencies}
         if overrides:
@@ -313,6 +329,7 @@ import_lock(root / "modlist.json", root / "modlist.lock.json", ArtifactStore(roo
         self.store.nexus_fetch = lambda source: self.root / ("feature.zip" if source["fileId"] == 2 else "base.zip")
         self.store.nexus_metadata = SimpleNamespace(exact_source=lambda source, ask: source,
             metadata=lambda source: metadata if source == feature_source else {"source": base_source, "complete": False,
+                "raw": {"dlc_dependency_definitions": []}, "materialized": {"dependencies": []},
                 "version": {"file": {"id": "base-lineage"}, "version": "1", "position": "1"}})
         document = {"schemaVersion": 1, "name": "Native", "game": {"id": "cyberpunk2077", "dlc": []},
             "dependencies": {"feature": {"source": feature_source}, "base": {"source": base_source, "recipe": "base.recipe.json"}}}
@@ -351,6 +368,31 @@ import_lock(root / "modlist.json", root / "modlist.lock.json", ArtifactStore(roo
                         {"dlc_targets": [{"dlc_id": "1"}]}]
                 with self.assertRaisesRegex(PackError, "native dependency|different locked source|native DLC"):
                     validate_lock(changed, document)
+
+        # Reviewing an optional legacy edge must retain the other known hard edges.
+        metadata["complete"] = False
+        metadata["unresolvedRequirements"] = [{"reason": "conditional", "requirement": {"notes": "Optional"}}]
+        recipe_path = self.root / "feature.recipe.json"
+        explicit = json.loads(recipe_path.read_text())
+        explicit["dependencies"] = {"base": {"source": base_source}}
+        recipe_path.write_text(json.dumps(explicit))
+        document["dependencies"]["zbase"] = document["dependencies"].pop("base")
+        self.lock.unlink()
+        document["dependencies"]["feature"].pop("recipe")
+        self.manifest.write_text(json.dumps(document))
+        with self.assertRaises(InputRequired) as error:
+            resolve_manifest(self.manifest, self.store, self.game, self.lock)
+        self.assertEqual(error.exception.request["unresolvedRequirements"], metadata["unresolvedRequirements"])
+        self.assertFalse(self.lock.exists())
+        requests = []
+        reviewed = resolve_manifest(self.manifest, self.store, self.game, self.lock,
+            ask=lambda request: requests.append(request) or str(self.root / "feature.recipe.json"))
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(len(reviewed["packages"]), 2)
+        validate_lock(reviewed, document)
+        reviewed["dependencyEdges"] = []
+        with self.assertRaisesRegex(PackError, "native dependency"):
+            validate_lock(reviewed, document)
 
     def test_collection_external_steps_require_fresh_target_acknowledgement(self):
         dep = self.dependency("mod", {"r6/scripts/a.reds": b"a"})
