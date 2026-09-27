@@ -17,6 +17,25 @@ class NexusProvider:
         self.request = request
         self.cache = {}
         self.legacy = legacy
+        self.explicit_pins = []
+
+    def set_explicit_pins(self, sources):
+        self.explicit_pins = [dict(source) for source in sources if source.get("type") == "nexus" and "fileId" in source]
+
+    def legacy_versions(self, source):
+        candidates = self.current_versions(source)
+        seen = {int(candidate['game_scoped_id']) for candidate in candidates}
+        for pin in self.explicit_pins:
+            if pin['game'] != source['game'] or pin['modId'] != source['modId'] or pin['fileId'] in seen:
+                continue
+            version, _ = self.file_version(pin)
+            # A legacy page requirement has no version range. An explicitly
+            # selected historical version can satisfy it, but is never chosen
+            # automatically for an unpinned dependency.
+            if version['category'] in ACTIVE | {'old_version'}:
+                candidates.append(version)
+                seen.add(pin['fileId'])
+        return candidates
 
     def download_archive(self, source, cache, progress=lambda text: None, transfer=download):
         """Use the supported Premium endpoint; keep signed URLs out of persisted state."""
@@ -100,7 +119,7 @@ class NexusProvider:
             raise PackError("Invalid Nexus file selection")
         return {**source, "fileId": choice}
 
-    def metadata(self, source):
+    def file_version(self, source):
         game = urllib.parse.quote(source["game"], safe="")
         version = self.get(f"/games/{game}/mod-file-versions/{source['fileId']}")
         if int(version["game_scoped_id"]) != source["fileId"]:
@@ -111,6 +130,10 @@ class NexusProvider:
         files = self.get(f"/mods/{mod['id']}/files")["mod_files"]
         if str(version["file"]["id"]) not in {str(file["id"]) for file in files}:
             raise PackError("Nexus file does not belong to the requested mod page")
+        return version, mod
+
+    def metadata(self, source):
+        version, mod = self.file_version(source)
         raw = self.get(f"/mod-file-versions/{version['id']}/dependencies")
         if "dependency_definitions" not in raw or "dlc_dependency_definitions" not in raw:
             raise PackError("Nexus returned an incomplete dependency response")
@@ -147,7 +170,7 @@ class NexusProvider:
                 continue
             required = {'type': 'nexus', 'game': source['game'], 'modId': int(item['modId'])}
             grouped = {}
-            for candidate in self.current_versions(required):
+            for candidate in self.legacy_versions(required):
                 lineage = str(candidate['file']['id'])
                 grouped.setdefault(lineage, {'id': lineage, 'mod': {'game_scoped_id': item['modId'],
                     'game': {'domain_name': source['game']}}, 'candidate_versions': []})['candidate_versions'].append(candidate)
@@ -160,6 +183,7 @@ class NexusProvider:
                 raise InputRequired('nexus-dlc', 'Unknown legacy DLC requirement', name=name)
             dlcs.append({'dlc_targets': [{'dlc_id': mapped}]})
         result.update(complete=not unresolved, unresolvedRequirements=unresolved, provenance='nexus-legacy-page-requirements',
+            explicitLegacyPins=deepcopy(self.explicit_pins),
             raw={'dependency_definitions': [{'id': d['id']} for d in normalized], 'dlc_dependency_definitions': dlcs},
             materialized={'dependencies': normalized})
         return result
@@ -176,9 +200,12 @@ def candidate_groups(metadata, *, allow_empty=False):
             if mod.get("status", "published") != "published":
                 continue
             for candidate in file["candidate_versions"]:
-                if candidate["category"] in ACTIVE:
-                    candidates.append((str(file["id"]), candidate, {"type": "nexus", "game": source["game"],
-                        "modId": int(mod["game_scoped_id"]), "fileId": int(candidate["game_scoped_id"])}))
+                selected_source = {"type": "nexus", "game": source["game"],
+                    "modId": int(mod["game_scoped_id"]), "fileId": int(candidate["game_scoped_id"])}
+                explicit_legacy = (metadata.get("provenance") == "nexus-legacy-page-requirements"
+                    and candidate["category"] == "old_version" and selected_source in metadata.get("explicitLegacyPins", []))
+                if candidate["category"] in ACTIVE or explicit_legacy:
+                    candidates.append((str(file["id"]), candidate, selected_source))
         candidates.sort(key=lambda item: (item[0], -Decimal(item[1]["position"]), str(item[1]["id"])))
         if not candidates and not allow_empty:
             raise PackError("No eligible version satisfies Nexus dependency " + str(definition["id"]))

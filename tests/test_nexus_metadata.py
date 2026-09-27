@@ -7,6 +7,32 @@ from mo2_modlists.nexus import NexusProvider, recipe_from_metadata
 
 
 class NexusMetadataTests(unittest.TestCase):
+    def test_historical_candidates_require_an_explicit_legacy_pin(self):
+        from mo2_modlists.nexus import candidate_groups
+        source, provider, responses = self.fixture()
+        metadata = provider.metadata(source)
+        old = metadata['materialized']['dependencies'][0]['candidate_mod_files'][0]['candidate_versions'][0]
+        old['category'] = 'old_version'
+        pin = {'type':'nexus','game':'cyberpunk2077','modId':11,'fileId':21}
+        metadata['explicitLegacyPins'] = [pin]
+        self.assertEqual(list(candidate_groups(metadata, allow_empty=True))[0][1], [])
+        metadata['provenance'] = 'nexus-legacy-page-requirements'
+        self.assertEqual(list(candidate_groups(metadata))[0][1][0][2], pin)
+        metadata['explicitLegacyPins'] = []
+        self.assertEqual(list(candidate_groups(metadata, allow_empty=True))[0][1], [])
+
+    def test_legacy_enumeration_checks_ownership_of_explicit_old_pin(self):
+        source, provider, responses = self.fixture()
+        responses['/games/cyberpunk2077/mod-file-versions/20']['data']['category'] = 'old_version'
+        provider.current_versions = lambda s: []
+        self.assertEqual(provider.legacy_versions(source), [])
+        provider.set_explicit_pins([source])
+        self.assertEqual(provider.legacy_versions(source)[0]['game_scoped_id'], '20')
+        provider.cache.clear()
+        responses['/mods/1000/files']['data']['mod_files'] = []
+        with self.assertRaisesRegex(PackError, 'does not belong'):
+            provider.legacy_versions(source)
+
     def test_premium_download_uses_exact_file_and_keeps_credentials_off_transfer(self):
         from pathlib import Path
         calls, transfers = [], []

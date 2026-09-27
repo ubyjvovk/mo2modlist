@@ -1,5 +1,12 @@
 # Progress: 2026-09-26
 
+## 0.6.2 — historical Collection pins and ITP gameplay confirmation
+
+- User confirmed the third-person mod works in the launched ITP test. This completes its loaded-game mod-function check, following the verified install, offline reproduction and profile export/re-import.
+- Fixed unversioned legacy page requirements excluding explicitly pinned historical files. Solver roots seed exact pins; the adapter verifies each file belongs to its requested mod page before adding an `old_version` candidate. Unpinned selection still uses active versions. File-level native ranges are not expanded. Explicit legacy pins are retained in metadata for lock validation. Tests cover old-pin eligibility, page ownership and isolation from native ranges.
+- Real CET+Essentials revision 49 now resolves to a complete 11-component lock with every original source/file pin preserved. Three reviewed recipe decisions from the previous turn remain explicit. Evidence: `artifacts/live-collection-20260927/reviewed-modlist.lock.json`. All 77 tests pass.
+- Preparing a separate `test-collection/MO2` and `C:/Users/d/Documents/MO2-Modlists-Collection-Game` from the disposable game using the GOG installed-file inventory. This isolates the Collection's older framework binaries from the working ITP profiles. Copy completion, installation and gameplay validation are still pending.
+
 ## Collection review pipeline fixes — 2026-09-27
 
 - Conditional and external legacy requirements now produce incomplete metadata with explicit unresolved entries, allowing the existing recipe-selection workflow to run. Previously the adapter raised before a recipe could be supplied. Known mandatory native requirements and DLC remain enforced by the solver, planning and lock validation, even with incomplete metadata and a reviewed local recipe. Regression coverage checks the prompt, successful review and rejection of missing known edges.

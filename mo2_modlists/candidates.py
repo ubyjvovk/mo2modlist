@@ -134,6 +134,9 @@ class Reporter(BaseReporter):
 
 
 def solve_nexus(roots, nexus, *, supplemental=None, progress=lambda text: None, installed_dlcs=None):
+    roots = list(roots)
+    if hasattr(nexus, "set_explicit_pins"):
+        nexus.set_explicit_pins([source for source, _ in roots])
     provider = CandidateProvider(nexus, supplemental, progress, installed_dlcs)
     requirements = [provider.pin(source, reason) for source, reason in roots]
     reporter = Reporter(progress)
