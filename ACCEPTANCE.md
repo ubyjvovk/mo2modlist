@@ -1,13 +1,13 @@
 # Source importer acceptance
 
-Status: 2026-09-27, version 0.6.2. Real ITP download, installation, offline reproduction and export/re-import passed; user confirmed third-person gameplay works. Real Collection resolution, cache-only installation, 138-file verification and startup passed; loaded-save/UI confirmation remains pending. Current mixed-source reproduction/gameplay also remains pending.
+Status: 2026-09-27, version 0.6.2. Real ITP download, installation, offline reproduction and export/re-import passed; user confirmed third-person gameplay works. Real Collection resolution, cache-only installation, 138-file verification and startup passed. Current mixed-source installation, network-blocked reproduction, 99-file verification and startup also passed. Collection and mixed-source loaded-world checks remain unverified. User requested autonomous computer-use playtesting, but the required runtime/tools are absent from the session.
 
 | Requirement | Evidence | Remaining check |
 | --- | --- | --- |
 | Export only Manifest v1 JSON; unknown-source Local/URL/Skip prompts | Manifest tests and real MO2 export probes | None for covered paths |
-| Mixed Nexus, GitHub and local sources with transitive dependencies | Five-component real pack installed as Mixed Source First; 37 managed files verified | Loaded-world smoke and second real locked profile |
+| Mixed Nexus, GitHub and local sources with transitive dependencies | Current 12-component mixed ITP pack installed twice; 99 managed files verified in both profiles | Loaded-world smoke |
 | Recipe options, alternatives, conflicts, native candidate backtracking | Resolver tests and live eight-component ITP graph installed | Broader live alternative/conflict cases |
-| Exact locks, verified cache, offline reinstall | Real ITP lock installed with socket networking blocked; 94 files verified | Real mixed-source second-profile reproduction |
+| Exact locks, verified cache, offline reinstall | Real ITP and mixed-source locks reproduced with socket networking blocked; 94/99 files verified | None for covered packs |
 | Archive safety, collisions, stage before activation, interrupted recovery | Automated tests including hard process exit and changed download validators | No general claim about every archive or runtime conflict |
 | Physical root deployment with ownership and restoration | Real framework launch and real MO2 restoration probes | Loaded-world check; physical writes affect all profiles using that game |
 | Profile export preserves verified installation recipe references | Real eight-component ITP export/re-import; 94 files verified | Real mixed-source profile re-export on current version |

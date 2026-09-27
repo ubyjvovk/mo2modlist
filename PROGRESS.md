@@ -1,5 +1,13 @@
 # Progress: 2026-09-26
 
+## Mixed-source reproduction — 2026-09-27
+
+- Installed `artifacts/mixed-itp-test/modlist.json` into `ITP - Mixed Sources` and reproduced the same lock into `ITP - Mixed Offline`. Both contain the 12 resolved components across Nexus, GitHub release and local archive sources. The offline reproduction replaced socket connection functions with failures; no network attempt occurred. Both profiles verified 99 managed files with zero differences before launch. All original ITP root hashes were preserved; the passive acceptance observer adds one Lua file.
+- The initial install correctly refused conflicting runtime `overwrite/bin/x64/CD Projekt Red/Cyberpunk 2077/user.gls`. With both game and MO2 closed, preserved the complete 20-file overwrite folder as `test-install/MO2/overwrite-before-mixed-itp`, then retried with an empty overwrite. No runtime files were deleted.
+- Deployed current 0.6.2 plugin to the stopped test MO2 and launched `ITP - Mixed Offline`. Current logs confirm redscript compilation and loading of ITP, Native Settings and the local acceptance observer. Loaded-world/input behavior is not yet verified for this profile.
+- User requested autonomous computer-use playtesting. Re-read the installed computer-use skill and searched the current tool inventory: neither `node_repl` nor desktop/browser control tools are exposed. The skill requires `@oai/sky` through that runtime and prohibits a custom helper protocol client. No additional user playtest was requested; hands-on Collection/mixed-source acceptance awaits that capability. Startup logs are not substituted for gameplay evidence.
+- Stable Play modlist hash still matches the recorded September 27 baseline. Artifacts: `artifacts/mixed-itp-test/{install-result.json,offline-install-result.json,verify-first.json,verify-offline.json,compatibility.json}`.
+
 ## Real Collection installation — 2026-09-27
 
 - After Cyberpunk closed, installed the resolved CET+Essentials revision 49 into the separate `test-collection/MO2` profile `CET Essentials - Collection`, targeting `C:/Users/d/Documents/MO2-Modlists-Collection-Game`. Installation used the verified cache with `--offline`; all 11 original pins were retained, with 72 physical root files.
