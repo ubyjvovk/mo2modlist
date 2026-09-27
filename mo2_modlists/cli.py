@@ -11,6 +11,12 @@ from .manifest import export_manifest, profile_sources, validate_manifest
 def main():
     parser = argparse.ArgumentParser(description="MO2 source manifests")
     sub = parser.add_subparsers(dest="command", required=True)
+    from_url = sub.add_parser("from-url", help="Create a source manifest from a Nexus mod or Collection URL")
+    from_url.add_argument("url")
+    from_url.add_argument("--output", required=True, type=Path)
+    from_url.add_argument("--name")
+    from_url.add_argument("--cache", type=Path)
+    from_url.add_argument("--decisions", type=Path)
     export = sub.add_parser("export", help="Export only modlist.json")
     export.add_argument("--mo2", required=True, type=Path)
     export.add_argument("--game", required=True, type=Path)
@@ -57,7 +63,14 @@ def main():
     args = parser.parse_args()
     progress = lambda message: print(message, file=sys.stderr, flush=True)
     try:
-        if args.command == "export":
+        if args.command == "from-url":
+            from .url_manifest import manifest_from_url
+            from .credentials import headers
+            decisions = json.loads(args.decisions.read_text(encoding="utf-8-sig")) if args.decisions else {}
+            document = manifest_from_url(args.url, args.output, name=args.name, cache=args.cache,
+                headers=headers("nexus"), decisions=decisions, progress=progress)
+            result = {"manifest": str(args.output), "dependencies": len(document["dependencies"])}
+        elif args.command == "export":
             candidates = profile_sources(args.mo2, args.profile, [args.mo2 / "downloads"] + args.archives, args.github_manifest)
             choices = json.loads(args.choices.read_text(encoding="utf-8-sig")) if args.choices else {}
             selections = {item["name"]: item["dependency"] for item in candidates if item["dependency"] is not None}

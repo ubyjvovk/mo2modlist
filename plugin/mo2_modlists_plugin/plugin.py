@@ -58,7 +58,7 @@ class ModlistsTool(mobase.IPluginTool):
         return "Export source manifests; resolve and install pinned modlists and review Nexus Collections."
 
     def version(self):
-        return mobase.VersionInfo(0, 5, 3)
+        return mobase.VersionInfo(0, 6, 0)
 
     def settings(self):
         return [mobase.PluginSetting("archive-directories", "Additional download directories, separated by semicolons", ""),
@@ -109,6 +109,9 @@ class ModlistsTool(mobase.IPluginTool):
         export = QPushButton("Export modlist.json…")
         layout.addWidget(export)
         export.clicked.connect(lambda: self.export_clicked(dialog, root, game, profile))
+        from_url = QPushButton("Create manifest from Nexus URL…")
+        layout.addWidget(from_url)
+        from_url.clicked.connect(lambda: self.importer.open_url(dialog, root, game))
         install = QPushButton("Install modlist.json or lock…")
         collection = QPushButton("Import Nexus Collection…")
         layout.addWidget(install)

@@ -260,6 +260,8 @@ silently discarded; its explicit recipe handoff is part of later resolution.
         for field in ("integrity", "recipe", "options", "extensions"):
             if field in decision:
                 dep[field] = decision[field]
+        if isinstance(mod.get("name"), str) and mod["name"].strip():
+            dep["extensions"] = {**dep.get("extensions", {}), "displayName": mod["name"]}
         dependencies[alias] = dep
         for path in mod.get("fileOverrides", []):
             path_winners.append({"winner": alias, "path": safe_relative(path.replace("\\", "/"))})

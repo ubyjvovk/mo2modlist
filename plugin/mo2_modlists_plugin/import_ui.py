@@ -46,7 +46,13 @@ class ImportController(QObject):
             if kind == "nexus-download":
                 source = request["source"]
                 manager = self.tool.organizer.downloadManager()
-                download_id = manager.startDownloadNexusFileForGame(source["game"], source["modId"], source["fileId"])
+                if hasattr(manager, "startDownloadNexusFileForGame"):
+                    download_id = manager.startDownloadNexusFileForGame(source["game"], source["modId"], source["fileId"])
+                else:
+                    current_game = self.tool.organizer.managedGame().gameNexusName()
+                    if current_game.casefold() != source["game"].casefold():
+                        raise PackError("This MO2 download API only supports its currently managed game")
+                    download_id = manager.startDownloadNexusFile(source["modId"], source["fileId"])
                 if download_id < 0:
                     pending["answer"] = self.choose_nexus_archive(parent, source,
                         "MO2 could not start this download. You can supply the exact archive downloaded through Nexus's supported website flow.")
@@ -123,8 +129,17 @@ class ImportController(QObject):
         from .mo2_modlists.nexus import NexusProvider
         github_headers = headers("github")
         nexus_headers = headers("nexus")
+        def nexus_fetch(source):
+            if nexus_headers:
+                if not hasattr(self, "nexus_premium"):
+                    account = json_request("https://api.nexusmods.com/v1/users/validate.json", headers=nexus_headers)
+                    self.nexus_premium = bool(account.get("is_premium"))
+                if not self.nexus_premium:
+                    return self.ask({"kind": "nexus-archive", "source": source,
+                        "message": "This Nexus account requires the website download flow. Download this exact file, then select its ZIP/7z. Existing cached bytes are reused automatically."})
+            return self.ask({"kind": "nexus-download", "source": source})
         return ArtifactStore(root / ".modlists/source-cache", archives, progress=report,
-            nexus_fetch=lambda source: self.ask({"kind": "nexus-download", "source": source}), manual_fetch=self.ask,
+            nexus_fetch=nexus_fetch, manual_fetch=self.ask,
             nexus_metadata=NexusProvider(nexus_headers) if nexus_headers else None,
             request=lambda url: json_request(url, headers=github_headers))
 
@@ -151,6 +166,8 @@ class ImportController(QObject):
                 if not accepted:
                     return
                 save(provider, secret)
+            if provider == "nexus" and hasattr(self, "nexus_premium"):
+                del self.nexus_premium
             QMessageBox.information(parent, "Provider credential", "Credential updated in Windows Credential Manager. It is never exported into manifests or locks.")
         except PackError as exc:
             QMessageBox.warning(parent, "Provider credential", str(exc))
@@ -273,15 +290,42 @@ class ImportController(QObject):
                     "Install the lock into a new profile to deploy its root files again."))
         self.tool.run_job(parent, lambda report: restoration_plan(root, game, operation), review)
 
-    def open_collection(self, parent, root, game):
+    def open_url(self, parent, root, game):
+        from .mo2_modlists.url_manifest import nexus_url_kind, manifest_from_url
+        url, accepted = QInputDialog.getText(parent, "Nexus URL to manifest", "Nexus mod or Collection URL:")
+        if not accepted or not url.strip():
+            return
+        try:
+            kind = nexus_url_kind(url)
+        except PackError as exc:
+            QMessageBox.warning(parent, "Invalid Nexus URL", str(exc))
+            return
+        if kind == "collection":
+            self.open_collection(parent, root, game, source_url=url)
+            return
+        name, accepted = QInputDialog.getText(parent, "Manifest name", "Mod or pack name:")
+        if not accepted or not name.strip():
+            return
+        filename, _ = QFileDialog.getSaveFileName(parent, "Save source manifest", "modlist.json", "Manifest (*.json)")
+        if not filename:
+            return
+        def saved(document):
+            choice = QMessageBox.question(parent, "Manifest saved", "Install this manifest into a new profile now?")
+            if choice == QMessageBox.StandardButton.Yes:
+                self.open_manifest(parent, root, game, filename)
+        from .mo2_modlists.credentials import headers
+        self.tool.run_job(parent, lambda report: manifest_from_url(url, Path(filename), name=name,
+            headers=headers("nexus"), ask=self.ask, progress=report), saved)
+
+    def open_collection(self, parent, root, game, source_url=None):
         from .mo2_modlists.collections import (read_collection, fetch_collection, convert_collection, write_collection_manifest,
                                              bundled_dependency, installer_fields, entry_source, handoff_complete)
-        choice, accepted = QInputDialog.getItem(parent, "Import Nexus Collection", "Collection source:",
+        choice, accepted = ("Nexus Collection URL", True) if source_url else QInputDialog.getItem(parent, "Import Nexus Collection", "Collection source:",
             ["Downloaded collection package", "Nexus Collection URL"], 0, False)
         if not accepted:
             return
         if choice == "Nexus Collection URL":
-            source, accepted = QInputDialog.getText(parent, "Nexus Collection", "Collection URL or NXM revision link:")
+            source, accepted = (source_url, True) if source_url else QInputDialog.getText(parent, "Nexus Collection", "Collection URL or NXM revision link:")
             if not accepted or not source:
                 return
         else:

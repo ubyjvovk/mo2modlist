@@ -416,6 +416,7 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
         key = json_digest({"component": component, "constraint": constraint})
         components[component] = (constraint, chain, key)
         packages[key] = {"component": component, "version": recipe["version"], "artifact": artifact,
+                         "displayName": dependency.get("extensions", {}).get("displayName") or (native or {}).get("displayName") or (native or {}).get("version", {}).get("name") or chain[-1],
                          "recipe": {"sha256": digest(recipe_path), "document": recipe,
                                     "bytesBase64": base64.b64encode(recipe_path.read_bytes()).decode("ascii")}, "options": options,
                          "selectedAlternatives": {name: options[name] for name in recipe.get("alternatives", {})},
@@ -423,7 +424,7 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
                          "recipeReference": recipe_path.resolve().as_posix(),
                          "sourceReferences": [dependency["source"]],
                          "nativeMetadata": native,
-                         "metadataProvenance": {"kind": "registry", "registry": supplement["registry"], "commit": supplement["commit"], "reason": supplement["reason"]} if supplement else {"kind": "nexus-v3-file-requirements" if acquired else "explicit-local-recipe"},
+                         "metadataProvenance": {"kind": "registry", "registry": supplement["registry"], "commit": supplement["commit"], "reason": supplement["reason"]} if supplement else {"kind": native.get("provenance", "nexus-v3-file-requirements") if acquired else "explicit-local-recipe"},
                          "outputs": outputs_for(store.path(artifact["sha256"]), selected.get("mappings"), progress)}
         native_sources[source_identity(artifact["source"], declaring)] = key
         for alias, required in sorted(selected["dependencies"].items()):

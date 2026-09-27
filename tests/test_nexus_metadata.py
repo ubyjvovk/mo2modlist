@@ -19,7 +19,7 @@ class NexusMetadataTests(unittest.TestCase):
             "/mod-file-versions/200/dependencies": {"dependency_definitions": [{"id": "range-1", "ranges": []}], "dlc_dependency_definitions": []},
             "/mod-file-versions/200/dependencies/ranges/materialized": {"dependencies": [{"id": "range-1", "candidate_mod_files": [
                 {"id": "101", "mod": {"game_scoped_id": "11", "game": {"domain_name": "cyberpunk2077"}}, "candidate_versions": [candidate]}]}]}}
-        provider = NexusProvider({}, request=lambda url, **kwargs: deepcopy(responses[url.removeprefix("https://api.nexusmods.com/v3")]))
+        provider = NexusProvider({}, legacy=False, request=lambda url, **kwargs: deepcopy(responses[url.removeprefix("https://api.nexusmods.com/v3")]))
         return source, provider, responses
 
     def test_materialized_file_dependency_normalizes_to_exact_source(self):
@@ -39,13 +39,49 @@ class NexusMetadataTests(unittest.TestCase):
         with self.assertRaises(InputRequired):
             recipe_from_metadata(metadata, "a" * 64)
 
+    def test_legacy_page_requirements_are_normalized_and_preserved(self):
+        source, provider, responses = self.fixture()
+        responses["/mod-file-versions/200/dependencies"]["dependency_definitions"] = []
+        responses["/mod-file-versions/200/dependencies/ranges/materialized"]["dependencies"] = []
+        provider.legacy = True
+        snapshot = {'gameId': '3333', 'legacyModRequirementsEnabled': True, 'modRequirements': {
+            'nexusRequirements': {'totalCount': 1, 'nodes': [{'modId':'11','gameId':'3333',
+                'externalRequirement':False,'notes':'Required'}]},
+            'dlcRequirements': [{'gameExpansion': {'name':'Phantom Liberty'}}]}}
+        provider.legacy_requirements = lambda s: deepcopy(snapshot)
+        provider.current_versions = lambda s: [{'file':{'id':'101'}, 'id':'201', 'name':'Framework',
+            'game_scoped_id':'21','category':'main','position':'1','version':'2','is_primary':False}]
+        metadata = provider.metadata(source)
+        self.assertEqual(metadata['legacySnapshot'], snapshot)
+        self.assertEqual(metadata['provenance'], 'nexus-legacy-page-requirements')
+        recipe = recipe_from_metadata(metadata, 'a'*64)
+        self.assertEqual(recipe['dependencies']['nexus-definition-legacy-11']['source']['fileId'],21)
+        self.assertEqual(recipe['game']['dlc'],['phantom-liberty'])
+        snapshot['modRequirements']['nexusRequirements']['nodes'][0]['notes']='Optional'
+        with self.assertRaises(InputRequired): provider.metadata(source)
+        snapshot['modRequirements']['nexusRequirements']['nodes'][0]['notes']='Required'
+        snapshot['modRequirements']['nexusRequirements']['totalCount']=2
+        with self.assertRaisesRegex(PackError,'truncated'): provider.metadata(source)
+
+    def test_disabled_legacy_flag_proves_empty_native_requirements(self):
+        source, provider, responses = self.fixture()
+        responses["/mod-file-versions/200/dependencies"]["dependency_definitions"] = []
+        responses["/mod-file-versions/200/dependencies/ranges/materialized"]["dependencies"] = []
+        provider.legacy=True
+        provider.legacy_requirements=lambda s: {'legacyModRequirementsEnabled':False}
+        self.assertTrue(provider.metadata(source)['complete'])
+
     def test_page_selection_enumerates_and_checks_explicit_choice(self):
-        source, provider, _ = self.fixture()
+        source, provider, responses = self.fixture()
         page = {key: value for key, value in source.items() if key != "fileId"}
+        self.assertEqual(provider.exact_source(page), source)
+        provider.cache.clear()
+        variants = responses["/mod-files/100/versions"]["data"]["versions"]
+        variants.append({**variants[0], "id": "202", "game_scoped_id": "22", "name": "Variant"})
         requests = []
         selected = provider.exact_source(page, ask=lambda request: requests.append(request) or 20)
         self.assertEqual(selected, source)
-        self.assertEqual(requests[0]["choices"], [20])
+        self.assertEqual(requests[0]["choices"], [20, 22])
         with self.assertRaisesRegex(PackError, "Invalid Nexus file"):
             provider.exact_source(page, ask=lambda request: 999)
 

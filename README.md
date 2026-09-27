@@ -1,6 +1,18 @@
 # MO2 Modlists
 
-Version 0.5 development preview exports **one `modlist.json`**, following [SPEC.md](SPEC.md), and implements a separate source resolver/importer. Export does not include locks, blobs or copied archives. The old installed-snapshot importer remains removed. Locks and caches are produced during resolution/import.
+Version 0.6 development preview exports **one `modlist.json`**, following [SPEC.md](SPEC.md), and implements a separate source resolver/importer. Export does not include locks, blobs or copied archives. The old installed-snapshot importer remains removed. Locks and caches are produced during resolution/import.
+
+## Create a manifest from a Nexus URL
+
+In MO2 choose **Create manifest from Nexus URL…** and paste a Cyberpunk mod or Collection URL. Mod conversion pins the selected mod and its immediate requirements to exact Nexus file IDs. Transitive requirements are expanded during resolution, not flattened into this manifest. An ambiguous file choice requires selection. Metadata needs the optional Nexus API credential; unknown requirements do not produce a silently incomplete manifest. Collection URLs use the existing full-package conversion and review workflow.
+
+```powershell
+.\.venv\Scripts\python.exe -m mo2_modlists.cli from-url 'https://www.nexusmods.com/cyberpunk2077/mods/32203' --output modlist.json
+```
+
+For Collection URLs also supply `--cache <directory>` and, when needed, `--decisions <json>`. Existing output files are preserved. Installing the resulting finalized lock with `install --offline` requires all locked archives in the cache; recipes and selections are already embedded in that lock. It does not refresh metadata or select new files.
+
+New installations use Nexus names, Collection names, or manifest aliases. Independent copies with the same name get a readable profile suffix rather than an internal hash in their displayed name. Internal component IDs and ownership journals remain separate.
 
 ## Export in MO2
 
@@ -71,9 +83,11 @@ The source importer has passed a tiny real-MO2 test: source JSON plus recipe/arc
 
 Nexus native dependency domains are solved with vendored resolvelib 1.2.1. Shared constraints intersect and incompatible candidates backtrack, including alternatives across file lineages. Exact pack pins constrain the result. Candidate selection was exercised inside real MO2; fixture tests cover transitive incompatibilities, cycles, missing DLC and unsatisfiable reason chains.
 
-**The full specification is not complete.** Live authenticated provider and representative Collection validation, broader crash recovery, fresh-instance runtime verification and the real mixed-source game smoke test remain. The historical snapshot game's successful launch does not verify the new source importer.
+**The full specification is not complete.** Authenticated Nexus resolution now works against Immersive Third Person and its transitive frameworks. Representative Collection validation, fresh-instance runtime verification and the real source-import game smoke test remain. The historical snapshot game's successful launch does not verify the new source importer.
 
-Optional **Provider credentials…** stores a Nexus API key or GitHub token in Windows Credential Manager. A Nexus key enables the isolated v3 metadata adapter and Collection package requests. It enumerates file lineages and versions, retains raw and materialized dependency definitions, and locks the solver's selections. An ambiguous top-level mod page still requires an explicit file choice. Empty new-style requirements remain unknown because the current GET schema does not identify whether legacy page requirements apply. Optional GitHub authentication applies to release metadata requests. No credential is exported or read from MO2's private credential storage.
+Optional **Provider credentials…** stores a Nexus API key or GitHub token in Windows Credential Manager. Nexus metadata combines v3 file lineages/requirements with the supported GraphQL `mod.modRequirements` and `legacyModRequirementsEnabled` fields. Legacy requirements and their notes are snapshotted; conditional requirements and external dependencies require review. A single eligible file can be pinned automatically; multiple candidates require selection. Optional GitHub authentication applies to release metadata requests. No credential is exported or read from MO2's private credential storage.
+
+MO2 2.5.2 downloads use its bound `startDownloadNexusFile(modId, fileId)` method for the managed game. Newer bindings may offer a game-qualified method. Non-Premium accounts still need Nexus's website flow for archives; an API key enables metadata but does not remove that restriction. When Nexus publishes an archive SHA-256 through its scan reference, matching cached/local bytes can be reused without downloading again, preserving Nexus source identity.
 
 The manifest schema is [modlist.schema.json](mo2_modlists/modlist.schema.json). Recipe/registry and Collection details are in [RECIPES.md](RECIPES.md). The current acceptance tracker is at the top of [PROGRESS.md](PROGRESS.md).
 

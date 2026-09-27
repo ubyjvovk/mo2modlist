@@ -180,7 +180,25 @@ class ArtifactStore:
         elif source["type"] == "nexus":
             if "fileId" not in source:
                 raise InputRequired("nexus-file", "Select an exact Nexus file; a mod page may contain independent variants/addons", source=source)
+            provider_integrity = False
+            if not expected and not self.offline and hasattr(self.nexus_metadata, "artifact_integrity"):
+                expected = self.nexus_metadata.artifact_integrity(source)
+                provider_integrity = bool(expected)
             path = self.local_nexus(source)
+            if path is None and expected:
+                cached = self.path(expected)
+                if cached.is_file() and digest(cached) == expected:
+                    path = cached
+                else:
+                    for directory in self.archives:
+                        if not directory.is_dir():
+                            continue
+                        for archive in sorted(directory.iterdir()):
+                            if archive.is_file() and archive.suffix.lower() in ('.zip', '.7z') and digest(archive) == expected:
+                                path = archive
+                                break
+                        if path is not None:
+                            break
             if path is None:
                 if self.offline or self.nexus_fetch is None:
                     request = InputRequired("nexus-archive", "Supply the exact downloaded Nexus archive", source=source, expectedSha256=expected)
@@ -190,6 +208,8 @@ class ArtifactStore:
                 else:
                     path = Path(self.nexus_fetch(source))
             result = self.store(path, source, expected)
+            if provider_integrity:
+                result['integrityKind'] = 'nexus-published-scan-hash'
         else:
             if self.offline:
                 raise InputRequired("offline-cache", "This locked GitHub archive is not cached", source=source, expectedSha256=expected)

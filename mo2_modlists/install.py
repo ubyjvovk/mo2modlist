@@ -17,6 +17,26 @@ from .manifest import validate_manifest, validate_source
 from .sources import stream_member
 
 
+def mod_label(value):
+    """Keep readable Unicode names while avoiding Windows and MO2 aliases."""
+    label = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", value).strip().rstrip(". ")[:100].rstrip(". ")
+    if not label or re.fullmatch(r"(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?", label):
+        label = "Mod " + label
+    return label
+
+
+def installed_name(mo2, package, profile_name, reserved):
+    label = mod_label(package.get("displayName") or package["component"])
+    occupied = {path.name.casefold() for path in (mo2 / "mods").iterdir()} if (mo2 / "mods").exists() else set()
+    occupied.update(name.casefold() for name in reserved)
+    candidate, number = label, 1
+    while candidate.casefold() in occupied:
+        suffix = "" if number == 1 else f" {number}"
+        candidate = f"{label} ({mod_label(profile_name)[:40]}{suffix})"
+        number += 1
+    return candidate
+
+
 @contextmanager
 def installation_guard(mo2):
     guard = safe_join(mo2, ".modlists/install.guard")
@@ -125,6 +145,8 @@ def _validate_lock(lock, manifest):
         if package["component"] in components:
             raise PackError("Multiple locked assignments for one component")
         components.add(package["component"])
+        if "displayName" in package and (not isinstance(package["displayName"], str) or not package["displayName"].strip()):
+            raise PackError("Invalid locked display name")
         artifact = package.get("artifact", {})
         validate_source(artifact.get("source"))
         if (not isinstance(artifact.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"])
@@ -159,7 +181,7 @@ def _validate_lock(lock, manifest):
             from .nexus import candidate_groups
             if native["source"] != source:
                 raise PackError("Native metadata belongs to a different locked source")
-            prefix = "" if package["metadataProvenance"]["kind"] == "nexus-v3-file-requirements" else "native-"
+            prefix = "" if package["metadataProvenance"]["kind"] in ("nexus-v3-file-requirements", "nexus-legacy-page-requirements") else "native-"
             selections = (lock.get("candidateResolution") or {}).get("selections", {}).get(json_digest(source), {})
             for definition, candidates in candidate_groups(native):
                 alias = prefix + "nexus-definition-" + definition
@@ -333,8 +355,7 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                     if actual != entry["sha256"] or temporary.stat().st_size != entry["size"]:
                         raise PackError("Extracted member differs from locked output")
                     os.replace(temporary, target)
-                label = re.sub(r"[^a-zA-Z0-9 _-]", "-", package["component"])[:45].strip() or "mod"
-                name = f"{label} [ML-{operation_id[:8]}-{index:03d}]"
+                name = journal["mods"].get(key) or installed_name(mo2, package, profile_name, names)
                 names.append(name)
                 destination = safe_join(mo2, "mods/" + name)
                 if not destination.exists():

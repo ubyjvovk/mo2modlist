@@ -124,8 +124,8 @@ def source_from_url(url):
         if parsed.query:
             raise PackError("GitHub release asset URL must not contain query parameters")
         return github_source(url.strip())
-    if parsed.netloc.lower() in ("www.nexusmods.com", "nexusmods.com"):
-        match = re.fullmatch(r"/([a-z0-9_-]+)/mods/([1-9][0-9]*)/?", parsed.path)
+    if parsed.netloc.lower() in ("www.nexusmods.com", "nexusmods.com", "next.nexusmods.com"):
+        match = re.fullmatch(r"/(?:games/)?([a-z0-9_-]+)/mods/([1-9][0-9]*)/?", parsed.path)
         query = urllib.parse.parse_qs(parsed.query)
         if match and set(query) <= {"tab", "file_id"}:
             source = {"type": "nexus", "game": match[1], "modId": int(match[2])}

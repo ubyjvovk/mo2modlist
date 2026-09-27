@@ -1,6 +1,7 @@
 """Nexus v3 file-lineage metadata adapter (experimental upstream endpoints)."""
 from copy import deepcopy
 from decimal import Decimal
+import re
 import urllib.parse
 
 from .acquisition import InputRequired, json_request
@@ -11,10 +12,40 @@ ACTIVE = {"main", "update", "optional", "miscellaneous"}
 
 
 class NexusProvider:
-    def __init__(self, headers, request=json_request):
+    def __init__(self, headers, request=json_request, *, legacy=True):
         self.headers = headers
         self.request = request
         self.cache = {}
+        self.legacy = legacy
+
+    def legacy_requirements(self, source):
+        key = ('legacy', source['game'], source['modId'])
+        if key not in self.cache:
+            game_key = ('game', source['game'])
+            if game_key not in self.cache:
+                self.cache[game_key] = self.request('https://api.nexusmods.com/v1/games/' + source['game'] + '.json', headers=self.headers)['id']
+            game_id = self.cache[game_key]
+            query = ('query($game:ID!,$mod:ID!){mod(gameId:$game,modId:$mod){name legacyModRequirementsEnabled '
+                'modRequirements { nexusRequirements { totalCount nodes { modId modName gameId notes url externalRequirement } } '
+                'dlcRequirements { notes gameExpansion { name } } }}}')
+            response = self.request('https://api.nexusmods.com/v2/graphql', headers=self.headers,
+                data={'query': query, 'variables': {'game': str(game_id), 'mod': str(source['modId'])}})
+            if response.get('errors') or not response.get('data', {}).get('mod'):
+                raise InputRequired('dependency-metadata', 'Nexus legacy requirements could not be retrieved', source=source)
+            self.cache[key] = {**response['data']['mod'], 'gameId': str(game_id)}
+        return deepcopy(self.cache[key])
+
+    def current_versions(self, source):
+        game = urllib.parse.quote(source['game'], safe='')
+        mod = self.get(f"/games/{game}/mods/{source['modId']}")
+        files = self.get(f"/mods/{mod['id']}/files")['mod_files']
+        candidates = []
+        for file in files:
+            if file['is_active']:
+                versions = self.get(f"/mod-files/{file['id']}/versions")['versions']
+                candidates.extend(v for v in versions if v['category'] in ACTIVE)
+        candidates.sort(key=lambda v: (str(v['file']['id']), -Decimal(v['position']), str(v['id'])))
+        return candidates
 
     def get(self, path):
         if path not in self.cache:
@@ -22,20 +53,25 @@ class NexusProvider:
             self.cache[path] = result.get("data", result)
         return deepcopy(self.cache[path])
 
+    def artifact_integrity(self, source):
+        key = ('artifact', source['game'], source['modId'], source['fileId'])
+        if key not in self.cache:
+            info = self.request(f"https://api.nexusmods.com/v1/games/{source['game']}/mods/{source['modId']}/files/{source['fileId']}.json", headers=self.headers)
+            if info.get('file_id') != source['fileId']:
+                raise PackError('Nexus returned a different artifact identity')
+            # The scan URL publishes a stable content identity, not a download URL.
+            match = re.fullmatch(r'https://www\.virustotal\.com/gui/file/([0-9a-fA-F]{64})(?:/[^?#]*)?', info.get('external_virus_scan_url') or '')
+            self.cache[key] = match[1].lower() if match else None
+        return self.cache[key]
+
     def exact_source(self, source, ask=None):
         if "fileId" in source:
             return source
-        game = urllib.parse.quote(source["game"], safe="")
-        mod = self.get(f"/games/{game}/mods/{source['modId']}")
-        files = self.get(f"/mods/{mod['id']}/files")["mod_files"]
-        candidates = []
-        for file in files:
-            if file["is_active"]:
-                versions = self.get(f"/mod-files/{file['id']}/versions")["versions"]
-                candidates.extend(v for v in versions if v["category"] in ACTIVE)
-        candidates.sort(key=lambda v: (str(v["file"]["id"]), -Decimal(v["position"]), str(v["id"])))
+        candidates = self.current_versions(source)
         if not candidates:
             raise PackError("No eligible Nexus files are available for this mod page")
+        if len(candidates) == 1:
+            return {**source, 'fileId': int(candidates[0]['game_scoped_id'])}
         request = InputRequired("nexus-file", "Select an exact Nexus file; main files, addons and variants are separate choices",
             source=source, choices=[int(v["game_scoped_id"]) for v in candidates],
             labels=[f"{v['name']} — {v['version']} ({v['category']})" for v in candidates])
@@ -66,8 +102,47 @@ class NexusProvider:
         # An empty new-style list is not proof that legacy page requirements are
         # disabled. The current API schema does not expose that flag on GET mod.
         complete = bool(raw["dependency_definitions"] or raw["dlc_dependency_definitions"])
-        return {"source": source, "version": version, "raw": raw, "materialized": materialized,
+        result = {"source": source, "displayName": mod.get("name", version.get("name", "")), "version": version, "raw": raw, "materialized": materialized,
                 "complete": complete, "provenance": "nexus-v3-file-requirements"}
+        if not self.legacy:
+            return result
+        legacy = self.legacy_requirements(source)
+        result['legacySnapshot'] = legacy
+        if not legacy['legacyModRequirementsEnabled']:
+            result['complete'] = True
+            return result
+        if complete:
+            raise InputRequired('dependency-metadata', 'Nexus exposes both legacy and file requirements; provide a reviewed recipe', source=source)
+        requirements = legacy['modRequirements']
+        page = requirements['nexusRequirements']
+        if len(page['nodes']) != page['totalCount']:
+            raise PackError('Nexus returned a truncated requirements list')
+        normalized = []
+        for item in page['nodes']:
+            if item['externalRequirement'] or item['gameId'] != legacy['gameId']:
+                raise InputRequired('dependency-metadata', 'External or foreign-game requirement needs a recipe', source=source)
+            # Conditional/optional prose cannot safely be promoted to a hard edge.
+            import re
+            if re.search(r'\b(optional|recommend|only|either|instead)\b', item.get('notes') or '', re.I):
+                raise InputRequired('dependency-metadata', 'Conditional legacy requirements need a reviewed recipe', source=source, requirement=item)
+            required = {'type': 'nexus', 'game': source['game'], 'modId': int(item['modId'])}
+            grouped = {}
+            for candidate in self.current_versions(required):
+                lineage = str(candidate['file']['id'])
+                grouped.setdefault(lineage, {'id': lineage, 'mod': {'game_scoped_id': item['modId'],
+                    'game': {'domain_name': source['game']}}, 'candidate_versions': []})['candidate_versions'].append(candidate)
+            normalized.append({'id': 'legacy-' + item['modId'], 'candidate_mod_files': list(grouped.values()), 'notes': item.get('notes')})
+        dlcs = []
+        for item in requirements['dlcRequirements']:
+            name = item['gameExpansion']['name']
+            mapped = {'Phantom Liberty': '1', 'REDmod': '2'}.get(name)
+            if mapped is None:
+                raise InputRequired('nexus-dlc', 'Unknown legacy DLC requirement', name=name)
+            dlcs.append({'dlc_targets': [{'dlc_id': mapped}]})
+        result.update(complete=True, provenance='nexus-legacy-page-requirements',
+            raw={'dependency_definitions': [{'id': d['id']} for d in normalized], 'dlc_dependency_definitions': dlcs},
+            materialized={'dependencies': normalized})
+        return result
 
 
 def candidate_groups(metadata, *, allow_empty=False):

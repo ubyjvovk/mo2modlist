@@ -4,6 +4,8 @@ Status: implementation started, 2026-09-26. This document describes the broader 
 
 Export contract, clarified by the user: export only `modlist.json`, using Manifest v1 below. No snapshot lockfile, content blobs or copied archives are part of export. If a source is unknown, ask the user to select an existing local archive, provide a source URL, or explicitly skip the mod. Cancellation cancels the export. A local archive reference remains a reference, not an embedded payload. Lockfiles and caches are products of the resolution/import pipeline. The earlier installed-snapshot prototype is a legacy experiment, not fulfillment of this source-manifest contract.
 
+URL conversion clarification (2026-09-27): accept a Nexus mod or Collection URL and produce Manifest v1. A mod manifest includes the selected mod and its direct requirements, all pinned to exact files; transitive requirements are resolved separately. With the complete lock and required cache contents, installation must work offline. Installed mods should display their normal Nexus/manifest names; independent copies may use readable disambiguation.
+
 ## Outcome
 
 An MO2 tool extension accepts `modlist.json`, resolves its dependencies across Nexus Mods, GitHub Releases and local archives, downloads the selected artifacts, and installs a reproducible Cyberpunk 2077 profile. A companion `modlist.lock.json` captures the complete installation plan. Existing profiles and their mod directories must remain unchanged.

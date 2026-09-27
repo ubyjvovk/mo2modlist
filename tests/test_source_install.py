@@ -61,6 +61,8 @@ class SourceInstallTests(unittest.TestCase):
         result = import_lock(self.manifest, self.lock, self.store, self.mo2, self.game, "New", allow_root=True)
         self.assertEqual((self.game / "bin/x64/loader.dll").read_bytes(), b"loader")
         self.assertTrue((Path(result["profile"]) / "modlist.txt").exists())
+        self.assertEqual(set(result["mods"]), {"feature", "framework"})
+        self.assertFalse(any("[ML-" in name for name in result["mods"]))
         for path in self.root.glob("*.zip"):
             path.unlink()
         for path in self.root.glob("*.recipe.json"):
@@ -68,6 +70,29 @@ class SourceInstallTests(unittest.TestCase):
         offline = ArtifactStore(self.root / "cache", offline=True, request=lambda *a, **k: self.fail("network"))
         repeated = import_lock(self.manifest, self.lock, offline, self.mo2, self.game, "Offline", allow_root=True)
         self.assertEqual(len(repeated["mods"]), 2)
+        self.assertEqual(set(repeated['mods']), {'feature (Offline)', 'framework (Offline)'})
+
+    def test_display_names_preserve_unicode_and_disambiguate_existing_mods(self):
+        from mo2_modlists.install import installed_name
+        (self.mo2/'mods'/'Éclairage').mkdir(parents=True)
+        package={'component':'nexus:lineage:123','displayName':'Éclairage'}
+        self.assertEqual(installed_name(self.mo2, package, 'New', []), 'Éclairage (New)')
+        self.assertEqual(installed_name(self.mo2, package, 'New', ['éclairage (new)']), 'Éclairage (New 2)')
+        package['displayName']='CON.txt'
+        self.assertEqual(installed_name(self.mo2, package, 'New', []), 'Mod CON.txt')
+
+    def test_nexus_published_hash_reuses_matching_archive_without_sidecar(self):
+        self.dependency('cached', {'r6/scripts/cached.reds': b'cached'})
+        archive=self.root/'cached.zip'
+        sha=digest(archive)
+        self.store.archives=[self.root]
+        self.store.nexus_metadata=SimpleNamespace(artifact_integrity=lambda source: sha)
+        self.store.nexus_fetch=lambda source: self.fail('Unnecessary download')
+        source={'type':'nexus','game':'cyberpunk2077','modId':12,'fileId':34}
+        artifact=self.store.acquire({'source':source},self.manifest)
+        self.assertEqual(artifact['sha256'],sha)
+        self.assertEqual(artifact['source'],source)
+        self.assertEqual(artifact['integrityKind'],'nexus-published-scan-hash')
 
     def test_manual_nexus_archive_keeps_source_and_verifies_locked_hash(self):
         dep = self.dependency("manual", {"r6/scripts/manual.reds": b"script"})
