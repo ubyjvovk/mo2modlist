@@ -1,29 +1,29 @@
 # Source importer acceptance
 
-Status: 2026-09-27, version 0.6.0. Implementation is available; final live acceptance is incomplete. Historical bundle gameplay does not validate this source importer.
+Status: 2026-09-27, version 0.6.1. Real ITP download, installation, offline reproduction and export/re-import passed. Final gameplay and real Collection installation acceptance remain incomplete.
 
 | Requirement | Evidence | Remaining check |
 | --- | --- | --- |
 | Export only Manifest v1 JSON; unknown-source Local/URL/Skip prompts | Manifest tests and real MO2 export probes | None for covered paths |
 | Mixed Nexus, GitHub and local sources with transitive dependencies | Five-component real pack installed as Mixed Source First; 37 managed files verified | Loaded-world smoke and second real locked profile |
-| Recipe options, alternatives, conflicts, native candidate backtracking | Resolver and source-install tests; vendored resolvelib runs in MO2 | Live eight-component Immersive Third Person graph passed; archive installation pending |
-| Exact locks, verified cache, offline reinstall | Automated tests and real MO2 fixture reinstallation | Real mixed-source second-profile reproduction |
+| Recipe options, alternatives, conflicts, native candidate backtracking | Resolver tests and live eight-component ITP graph installed | Broader live alternative/conflict cases |
+| Exact locks, verified cache, offline reinstall | Real ITP lock installed with socket networking blocked; 94 files verified | Real mixed-source second-profile reproduction |
 | Archive safety, collisions, stage before activation, interrupted recovery | Automated tests including hard process exit and changed download validators | No general claim about every archive or runtime conflict |
 | Physical root deployment with ownership and restoration | Real framework launch and real MO2 restoration probes | Loaded-world check; physical writes affect all profiles using that game |
-| Profile export preserves verified installation recipe references | Custom-mapping export/import regression | Real mixed-source profile re-export on current version |
+| Profile export preserves verified installation recipe references | Real eight-component ITP export/re-import; 94 files verified | Real mixed-source profile re-export on current version |
 | Nexus Collection package/rules/manual choices | Full-package fixtures and real MO2 Collection fixture imports | Representative downloaded Collection or authenticated live revision |
-| Nexus acquisition and manual fallback | Verified Codeware bytes with exact Nexus identity; manager bridge registered in MO2 | Installed binding fixed; non-Premium transfer requires website handoff |
+| Nexus acquisition and manual fallback | Real Premium API downloads of ITP and Native Settings matched published hashes | Non-Premium transfer requires website handoff |
 | Existing installation preserved | Disposable MO2/game only; stable Play hash recorded in PROGRESS.md | Recheck at final acceptance |
 
 ## Resume live acceptance
 
-1. Supply the exact Immersive Third Person archive (32203/161480) and Native Settings UI (3518/63684) through the supported Nexus website flow. Six framework archives already match Nexus-published hashes. Metadata authentication and live transitive resolution are verified.
-2. Resolve `artifacts/itp-nexus-test/modlist.json` to its complete lock, review actual output mappings/collisions, and install into a fresh named profile in the cleaned disposable MO2. Do not publish a partial profile.
-3. Verify managed files and readable names, then reproduce the lock in a second profile with network access disabled. Export/re-import the resulting profile with its verified recipe references available.
-4. Launch through the test MO2 and perform a loaded-world/input/mod-function check. The user's successful Probe - Reimport run was an older snapshot import, before the authorized test cleanup.
+1. Completed: Premium downloaded ITP 32203/161480 and Native Settings UI 3518/63684; six framework archives were reused by matching Nexus-published hashes.
+2. Completed: resolved eight components and installed `ITP - Nexus Test` with readable names.
+3. Completed: `ITP - Offline Test` installed with network connections blocked; one-file export imported into `ITP - Reexport Test`. All three profiles verified 94 managed files without differences before launch.
+4. In progress: launched `ITP - Nexus Test`; script compilation and ITP/nativeSettings loading succeeded. User confirmation of loaded-world/input/mod-function behavior is pending. Historical Probe - Reimport gameplay does not replace this check.
 5. Complete real Collection resolution/import. CET+Essentials revision 49 was downloaded and converted to 11 exact file references. Installation is still blocked by its declared `2.3.1.0` game version versus observed `2.31`; a dependency-only probe also requires review of Virtual Atelier's optional legacy requirement. Preserve unresolved choices as incomplete. Evidence is under `artifacts/live-collection-20260927`.
 6. Recheck stable-profile preservation and record final scope limits. Stable installation is outside cleanup/deployment scope.
 
-The prior test data is recoverable under `test-install/cleanup-20260927`; the current instance has only an empty Default profile until the new installation succeeds. Browser/desktop control tools were absent during the latest work, so website-only downloads await a supported interactive flow.
+The prior test data is recoverable under `test-install/cleanup-20260927`. Current profiles are Default and the three ITP acceptance profiles. Browser/desktop control tools remain unavailable; Premium API access removed the archive-download blocker.
 
 Current evidence lives under ignored `artifacts/`; private manifests, caches, credentials and screenshots are not release contents. The disposable game is a copy based on GOG's installed-file list, not a vendor-hash-verified pristine download.

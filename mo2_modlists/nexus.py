@@ -4,8 +4,8 @@ from decimal import Decimal
 import re
 import urllib.parse
 
-from .acquisition import InputRequired, json_request
-from .core import PackError
+from .acquisition import InputRequired, json_request, download
+from .core import PackError, json_digest
 
 
 ACTIVE = {"main", "update", "optional", "miscellaneous"}
@@ -17,6 +17,24 @@ class NexusProvider:
         self.request = request
         self.cache = {}
         self.legacy = legacy
+
+    def download_archive(self, source, cache, progress=lambda text: None, transfer=download):
+        """Use the supported Premium endpoint; keep signed URLs out of persisted state."""
+        account = self.request("https://api.nexusmods.com/v1/users/validate.json", headers=self.headers)
+        if account.get("is_premium") is not True:
+            raise InputRequired("nexus-archive", "Use the Nexus website to download this exact file", source=source)
+        game = urllib.parse.quote(source["game"], safe="")
+        links = self.request(f"https://api.nexusmods.com/v1/games/{game}/mods/{source['modId']}/files/{source['fileId']}/download_link.json",
+                             headers=self.headers)
+        if (not isinstance(links, list) or not links or not isinstance(links[0], dict)
+                or not isinstance(links[0].get("URI"), str)):
+            raise PackError("Nexus returned no archive download link")
+        target = cache / "downloads" / (json_digest(source) + ".archive")
+        # Nexus CDN filenames may contain literal spaces; leave signed query bytes intact.
+        link = urllib.parse.urlsplit(links[0]["URI"])
+        url = urllib.parse.urlunsplit(link._replace(path=urllib.parse.quote(link.path, safe="/%:@!$&'()*+,;=-._~")))
+        transfer(url, target, progress)
+        return target
 
     def legacy_requirements(self, source):
         key = ('legacy', source['game'], source['modId'])

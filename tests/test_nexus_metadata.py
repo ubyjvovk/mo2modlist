@@ -7,6 +7,29 @@ from mo2_modlists.nexus import NexusProvider, recipe_from_metadata
 
 
 class NexusMetadataTests(unittest.TestCase):
+    def test_premium_download_uses_exact_file_and_keeps_credentials_off_transfer(self):
+        from pathlib import Path
+        calls, transfers = [], []
+        source = {"type": "nexus", "game": "cyberpunk2077", "modId": 10, "fileId": 20}
+        def request(url, **kwargs):
+            calls.append((url, kwargs))
+            return {"is_premium": True} if url.endswith("validate.json") else [{"URI": "https://cdn.example/My Mod%20UI.zip?token=ephemeral"}]
+        provider = NexusProvider({"apikey": "test-secret"}, request=request)
+        target = provider.download_archive(source, Path("cache"), transfer=lambda *args: transfers.append(args))
+        self.assertTrue(calls[1][0].endswith("/mods/10/files/20/download_link.json"))
+        self.assertEqual(transfers[0][0], "https://cdn.example/My%20Mod%20UI.zip?token=ephemeral")
+        self.assertEqual(transfers[0][1], target)
+        self.assertNotIn("ephemeral", str(target))
+        self.assertEqual(len(transfers[0]), 3)
+
+    def test_non_premium_download_requests_website_archive_without_transfer(self):
+        from pathlib import Path
+        provider = NexusProvider({}, request=lambda *a, **k: {"is_premium": False})
+        with self.assertRaises(InputRequired) as error:
+            provider.download_archive({"type": "nexus", "game": "cyberpunk2077", "modId": 10, "fileId": 20}, Path("cache"),
+                                      transfer=lambda *a: self.fail("must not download"))
+        self.assertEqual(error.exception.request["kind"], "nexus-archive")
+
     def fixture(self):
         source = {"type": "nexus", "game": "cyberpunk2077", "modId": 10, "fileId": 20}
         version = {"id": "200", "file": {"id": "100"}, "game_scoped_id": "20", "name": "Feature", "version": "1", "position": "1", "category": "main"}

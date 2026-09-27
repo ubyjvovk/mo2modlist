@@ -119,8 +119,10 @@ def main():
             from .planning import resolve_manifest
             from .install import import_lock
             nexus_headers, github_headers = headers("nexus"), headers("github")
+            nexus = NexusProvider(nexus_headers) if nexus_headers and not args.offline else None
             store = ArtifactStore(args.cache, args.archives, offline=args.offline, progress=progress,
-                nexus_metadata=NexusProvider(nexus_headers) if nexus_headers and not args.offline else None,
+                nexus_metadata=nexus,
+                nexus_fetch=(lambda source: nexus.download_archive(source, args.cache, progress)) if nexus else None,
                 request=lambda url: json_request(url, headers=github_headers))
             if args.command == "resolve" or (args.command == "import" and not args.lock.exists()):
                 lock = resolve_manifest(args.manifest, store, args.game, args.lock, progress=progress)

@@ -1,5 +1,13 @@
 # Progress: 2026-09-26
 
+## 0.6.1 — Premium downloads and real ITP import acceptance
+
+- User enabled Nexus Premium; the configured key now reports `is_premium: true`. Added the supported exact-file Premium API downloader to CLI resolution/import, retaining the website/archive handoff for non-Premium users. Signed URLs are not saved as source metadata, and API credentials are not forwarded to CDN transfers. Live Native Settings URLs contained spaces; path encoding now preserves existing escapes and signed query bytes.
+- Downloaded the two missing exact Nexus archives; both matched their published SHA-256. The original seven-entry ITP manifest resolved to eight components, discovering RED4ext transitively. Full lock: `artifacts/itp-nexus-test/modlist.lock.json`.
+- Installed `ITP - Nexus Test` into the disposable MO2 with eight readable mod names. Installed the same lock into `ITP - Offline Test` with `--offline` and socket connection functions replaced with failures: no network attempt occurred. Exported the first profile to one manifest, resolved it and imported `ITP - Reexport Test`. All three installations verified 94 managed files with zero differences before launch. Physical framework deployment comprises 76 root files.
+- Launched `ITP - Nexus Test` through MO2's documented `run -e` interface. RED4ext loaded six plugins, including the ITP HeadGuard/LootRange/Move360 components; redscript compilation succeeded; CET reports `immersive_third_person` and `nativeSettings` loaded. Loaded-save/input/mod-behavior confirmation remains pending with the user. Logs alone do not prove gameplay acceptance.
+- Stable Play modlist SHA-256 still matches `27d1909d8348a8c7e76004d77ef15a64fced0968a7ae27a84aa134516fe63e56`. The stable installation was not modified. All 74 unittest tests pass. The running test MO2 is left available for gameplay checking; plugin package deployment can follow after it exits.
+
 ## Real Collection validation — 2026-09-27
 
 - Downloaded the full authenticated Nexus package for CET+Essentials (`n0nymh`, revision 49, revision ID 698560). Package SHA-256: `7674ebd75105a6750e5d5ac09aad86765deea2f0998558c657c0e4ef2b672186`. Conversion now produces a manifest with all 11 exact recorded Nexus file IDs.
