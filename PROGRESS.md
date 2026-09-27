@@ -1,5 +1,9 @@
 # Progress: 2026-09-26
 
+## Save-location recovery follow-up — 2026-09-27
+
+The known-folder repair above changed the save location for all game launches, but initially copied only the test autosave. This hid the user's existing saves from the load menu. After the user reported the problem, found 37 saves in the stable MO2 Overwrite/RedHotTools relative directory and 34 in the main game's bin/x64 relative directory. Copied all 71 distinct saves into `C:/Users/d/Saved Games/CD Projekt Red/Cyberpunk 2077`, leaving all originals and the existing test autosave intact. Conflicting folder names received unused ManualSave slots; every copied file was hash-verified. The destination now contains 72 save folders. Preserved the previous destination and a per-save recovery map under ignored `artifacts/save-recovery-20260927`. Menu visibility after this recovery has not yet been checked in-game.
+
 ## 0.6.3 — autonomous gameplay acceptance, 2026-09-27
 
 - Used the explicitly authorized local foreground-only capture/input helpers to playtest both disposable installations. The previous computer-use availability blocker no longer applies. Helpers and screenshots remain private under ignored artifacts.
