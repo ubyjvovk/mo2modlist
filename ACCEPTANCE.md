@@ -1,6 +1,6 @@
 # Source importer acceptance
 
-Status: 2026-09-27, version 0.6.2. Real ITP download, installation, offline reproduction and export/re-import passed; user confirmed third-person gameplay works. Real Collection resolution passed; its installation/gameplay acceptance remains incomplete.
+Status: 2026-09-27, version 0.6.2. Real ITP download, installation, offline reproduction and export/re-import passed; user confirmed third-person gameplay works. Real Collection resolution, cache-only installation, 138-file verification and startup passed; loaded-save/UI confirmation remains pending. Current mixed-source reproduction/gameplay also remains pending.
 
 | Requirement | Evidence | Remaining check |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ Status: 2026-09-27, version 0.6.2. Real ITP download, installation, offline repr
 2. Completed: resolved eight components and installed `ITP - Nexus Test` with readable names.
 3. Completed: `ITP - Offline Test` installed with network connections blocked; one-file export imported into `ITP - Reexport Test`. All three profiles verified 94 managed files without differences before launch.
 4. Completed: launched `ITP - Nexus Test`; script compilation and ITP/nativeSettings loading succeeded. User confirmed third-person mod gameplay works.
-5. Complete real Collection import/gameplay. CET+Essentials revision 49 resolved to 11 components with every original file pin preserved, including historical ArchiveXL. Three conditional requirements have explicit review recipes. A separate test MO2/game is being prepared to preserve the ITP runtime. Evidence is under `artifacts/live-collection-20260927`.
+5. Complete real Collection gameplay check. CET+Essentials revision 49 installed from cache into `test-collection/MO2`, with every original pin preserved and three explicit review recipes. All 138 managed files verified; frameworks loaded and scripts compiled. User loaded-save/UI confirmation is pending. Evidence is under `artifacts/live-collection-20260927`.
 6. Recheck stable-profile preservation and record final scope limits. Stable installation is outside cleanup/deployment scope.
 
 The prior test data is recoverable under `test-install/cleanup-20260927`. Current profiles are Default and the three ITP acceptance profiles. Browser/desktop control tools remain unavailable; Premium API access removed the archive-download blocker.

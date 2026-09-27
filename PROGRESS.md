@@ -1,5 +1,12 @@
 # Progress: 2026-09-26
 
+## Real Collection installation — 2026-09-27
+
+- After Cyberpunk closed, installed the resolved CET+Essentials revision 49 into the separate `test-collection/MO2` profile `CET Essentials - Collection`, targeting `C:/Users/d/Documents/MO2-Modlists-Collection-Game`. Installation used the verified cache with `--offline`; all 11 original pins were retained, with 72 physical root files.
+- Verification passed for 138 managed files, component identities and enabled ordering, with zero differences. Launched via MO2: ArchiveXL, Codeware 1.20.3, Mod Settings 0.2.21 and TweakXL 1.11.3 loaded; redscript compilation completed successfully. Loaded-save/UI confirmation is pending with the user. Evidence: `artifacts/live-collection-20260927/{install-result.json,verify-install.json}` and the separate test game's logs.
+- Prepared a current mixed-source ITP manifest/lock under `artifacts/mixed-itp-test`: 12 components using Nexus, GitHub releases and a local passive acceptance-observer archive, including transitive dependencies. Its root plan preserves all 76 ITP root file hashes and adds only the passive observer Lua file. This permits the remaining mixed-source test on the original disposable target without changing its working framework versions. Installation/reproduction/gameplay are pending the Collection game closing.
+- Stable Play modlist hash remains `27d1909d8348a8c7e76004d77ef15a64fced0968a7ae27a84aa134516fe63e56`.
+
 ## Follow-up acceptance preparation — 2026-09-27
 
 - Re-resolved the real mixed-source acceptance manifest with current code and authenticated native metadata. `artifacts/mixed-source-smoke1/current-source.lock.json` contains six components, five dependency edges, and GitHub release, Nexus and local-archive sources. This is a planning result; current-version mixed-source reinstall/gameplay remains pending.
