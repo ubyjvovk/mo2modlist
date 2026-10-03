@@ -13,7 +13,7 @@ import zipfile
 from mo2_modlists.acquisition import ArtifactStore, InputRequired, download
 from mo2_modlists.core import PackError, digest
 from mo2_modlists.install import import_lock
-from mo2_modlists.planning import resolve_manifest
+from mo2_modlists.planning import resolve_source_plan as resolve_manifest
 from mo2_modlists.sources import members
 
 
@@ -246,7 +246,8 @@ class SourceInstallTests(unittest.TestCase):
         new_lock = self.root / "exported.lock.json"
         resolve_manifest(exported, self.store, self.game, new_lock, ask=lambda request: self.fail("Lost recipe metadata"))
         result = import_lock(exported, new_lock, self.store, self.mo2, self.game, "Second")
-        self.assertEqual((self.mo2 / "mods" / result["mods"][0] / "r6/scripts/a.reds").read_bytes(), b"a")
+        installed = [self.mo2 / 'mods' / name / 'r6/scripts/a.reds' for name in result['mods']]
+        self.assertEqual([p.read_bytes() for p in installed if p.is_file()], [b'a'])
         (self.root / "mod.recipe.json").write_text('{"changed": true}')
         self.assertNotIn("recipe", profile_sources(self.mo2, "First")[0]["dependency"])
 

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from mo2_modlists.core import PackError
-from mo2_modlists.manifest import (export_manifest, validate_manifest, source_from_url,
+from mo2_modlists.manifest import (capture_profile_plan as export_manifest, validate_manifest, source_from_url,
                                   profile_sources, local_dependency)
 
 

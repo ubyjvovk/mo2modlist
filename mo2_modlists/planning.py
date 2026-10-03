@@ -174,7 +174,7 @@ def validate_output_paths(paths):
             raise PackError("Archive output collides with MO2 management metadata")
 
 
-def priority_for(packages, aliases, rules, ask=None, decisions=None, collection=None):
+def priority_for(packages, aliases, rules, ask=None, decisions=None, collection=None, preferred=()):
     by_path = {}
     edges = {key: set() for key in packages}
     declared = {}
@@ -243,17 +243,32 @@ def priority_for(packages, aliases, rules, ask=None, decisions=None, collection=
                 edges[winner].add(loser)
     ordered = []
     remaining = set(packages)
+    if not isinstance(preferred, (list, tuple)) or any(not isinstance(p, str) for p in preferred) or len(set(preferred)) != len(preferred):
+        raise PackError("Invalid preferred component order")
+    ranks = {component: i for i, component in enumerate(preferred)}
     while remaining:
         available = sorted(key for key in remaining if not any(key in edges[other] for other in remaining))
         if not available:
             raise PackError("File winner rules form an ordering cycle")
+        if preferred:
+            available = [min(available, key=lambda key: (ranks.get(packages[key]["component"], len(ranks)), key))]
         ordered.extend(available)
         remaining.difference_update(available)
     return ordered
 
 
-def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *, progress=lambda text: None, ask=None):
+def resolve_source_plan(manifest_path: Path, store, game: Path, lock_path: Path, *, progress=lambda text: None, ask=None):
     document = validate_manifest(json.loads(manifest_path.read_text(encoding="utf-8-sig")))
+    from .packages import is_package, compile_package
+    if is_package(document):
+        if lock_path.exists():
+            raise PackError('Lock destination exists; choose a new lockfile for explicit re-resolution')
+        compiled = compile_package(manifest_path, store, progress=progress, ask=ask, game=game)
+        lock = resolve_source_plan(compiled, store, game, lock_path, progress=progress, ask=ask)
+        lock['packageInputSha256'] = json_digest(document)
+        lock['resolvedManifest'] = json.loads(compiled.read_text(encoding='utf-8'))
+        write_json(lock_path, lock)
+        return lock
     if ask is not None:
         original_ask, answers = ask, {}
         def ask(request):
@@ -397,13 +412,16 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
             if supplement:
                 dependency = {**dependency, "recipe": supplement["path"].as_posix()}
         if "recipe" not in dependency:
-            request = InputRequired("dependency-metadata", "Required dependency metadata is unknown; provide a recipe with an explicit dependency list", chain=chain, source=dependency["source"])
+            request = InputRequired("dependency-metadata", "Required dependency metadata is unknown; provide a package.json with explicit dependencies", chain=chain, source=dependency["source"])
             if ask is None:
                 raise request
             selected_path = ask(request.request)
             if not isinstance(selected_path, str) or not Path(selected_path).is_absolute():
-                raise PackError("Recipe selection must be an absolute path")
-            dependency = {**dependency, "recipe": selected_path}
+                raise PackError("Package selection must be an absolute path")
+            compiled = compile_package(Path(selected_path), store, progress=progress, ask=ask, game=game)
+            prepared_document = json.loads(compiled.read_text(encoding='utf-8'))
+            prepared_dependency = next(iter(prepared_document['dependencies'].values()))
+            dependency = {**dependency, 'recipe': prepared_dependency['recipe']}
         recipe_path = reference_path(dependency["recipe"], declaring)
         recipe = load_recipe(recipe_path)
         selected, options = selected_recipe(recipe, dependency.get("options", {}), ask)
@@ -436,7 +454,10 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
             if dependency["source"] not in packages[key]["sourceReferences"]:
                 packages[key]["sourceReferences"].append(dependency["source"])
             return key
-        artifact = acquired or store.acquire(dependency, declaring)
+        prepared = recipe.get('extensions', {}).get('acquiredArtifact')
+        if prepared and (prepared['sha256'] != recipe['artifact'].removeprefix('sha256:') or not store.verified(prepared)):
+            raise PackError('Prepared package archive differs from its definition')
+        artifact = acquired or prepared or store.acquire(dependency, declaring)
         key = json_digest({"component": component, "constraint": constraint})
         components[component] = (constraint, chain, key)
         packages[key] = {"component": component, "version": recipe["version"], "artifact": artifact,
@@ -467,7 +488,8 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
     collection = document.get("extensions", {}).get("nexusCollection", {})
     if collection and collection.get("schemaVersion") != 1:
         raise PackError("Unsupported Nexus collection metadata version")
-    priority = priority_for(packages, aliases, document.get("fileOverrides", []), ask, choices, collection)
+    priority = priority_for(packages, aliases, document.get("fileOverrides", []), ask, choices, collection,
+                            document.get("extensions", {}).get("profilePriority", []))
     for rule in collection.get("rules", []):
         if rule["type"] == "requires":
             edges.append({"from": aliases[rule["source"]], "to": aliases[rule["target"]], "alias": rule["target"], "provenance": "nexus-collection"})
@@ -487,3 +509,10 @@ def resolve_manifest(manifest_path: Path, store, game: Path, lock_path: Path, *,
         raise PackError("Lock destination exists; choose a new lockfile for explicit re-resolution")
     write_json(lock_path, lock)
     return lock
+
+
+def resolve_manifest(manifest_path, store, game, lock_path, *, progress=lambda text: None, ask=None):
+    """Public package resolution; source plans are generated internal inputs only."""
+    from .packages import validate_package
+    validate_package(json.loads(manifest_path.read_text(encoding='utf-8-sig')))
+    return resolve_source_plan(manifest_path, store, game, lock_path, progress=progress, ask=ask)

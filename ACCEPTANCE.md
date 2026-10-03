@@ -1,6 +1,6 @@
 # Source importer acceptance
 
-Status: 2026-09-27, version 0.7.0. The specified source-manifest workflow and representative CP77/Nexus Collection acceptance checks have passed. New Vegas acceptance is tracked separately below. The release remains a development preview with the scope limits below.
+Status: 2026-09-30, version 0.9.0. The specified source-manifest workflow and representative CP77/Nexus Collection acceptance checks have passed. Current-profile additions, URL loading and manifest checks have automated and real-MO2 integration coverage. New Vegas gameplay acceptance is tracked separately below. The release remains a development preview with the scope limits below.
 
 | Requirement | Evidence | Scope |
 | --- | --- | --- |
@@ -14,8 +14,11 @@ Status: 2026-09-27, version 0.7.0. The specified source-manifest workflow and re
 | Real Nexus Collection conversion and import | Authenticated CET+Essentials revision 49, all 11 exact pins preserved, three explicitly reviewed recipes, 138 initial files verified | Browser Extension/Virtual Atelier settings and loaded-world movement smoke passed |
 | Playable fresh profile | User confirmed ITP third-person operation; autonomous mixed-source and Collection save/load/move/crouch checks passed | Representative smoke checks, not long-duration stability tests |
 | Existing installation preserved | Stable Play hash matches September 27 baseline; deployment confined to disposable MO2/game directories | Windows Saved Games location was repaired separately after failed-drive discovery |
+| Add mod/modlist to current profile | Combined-graph tests, CLI plan/apply, real MO2 add-and-repeat probe in a selected disposable profile | Reuses unchanged folders; isolates replacements; preserves settings/saves and explicitly unmanaged mods; no generic update/uninstall command |
+| Existing-profile interruption recovery | Exception rollback and hard-process-exit tests during profile publication, root backup restoration and stale-review checks | Local upgrade edits and conflicting recorded shared-root consumers block; other instances/unmanaged consumers cannot be detected |
+| Manifest URL loading and upstream checks | 12 transport/cache/provenance/update tests; real MO2 current/fresh URL import, automatic throttle and reviewed latest import; public GitHub transport read | Public HTTPS manifests/recipes; separate daily checker; no automatic pin changes or upstream-removal synchronization; UI fixtures do not test gameplay |
 
-The automated suite has 94 passing tests. Additional acceptance cases include unavailable locked assets, selected-variant output separation, source identity/hash changes, manifest/lock mismatch, native dependency omission, root restoration protection, unsupported Collection choices, New Vegas Data mounting, plugin master ordering, extended TES4 subrecords, bundled Collection directories and hash-bound external reviews.
+The automated suite has 124 passing tests. Additional acceptance cases include unavailable locked assets, selected-variant output separation, source identity/hash changes, manifest/lock mismatch, native dependency omission, root restoration protection, unsupported Collection choices, New Vegas Data mounting, plugin master ordering, extended TES4 subrecords, bundled Collection directories and hash-bound external reviews.
 
 ## Live evidence
 
@@ -38,3 +41,39 @@ The first hands-on reload exposed CET Lua lookup failures caused by runtime Over
 The test save initially could not be found because Windows Saved Games still referred to the failed F: drive. That known-folder location was repaired and the preserved test autosave copied to the restored location without overwriting existing saves. See PROGRESS.md for the repair record.
 
 Private manifests, caches, credentials, helper code and screenshots under ignored `artifacts/` are not release contents. Disposable game directories were copied from GOG's installed-file list, not verified against vendor hashes. Non-Premium acquisition remains a website/manual-archive handoff; universal mod/runtime compatibility is not claimed.
+
+
+## Unified package acceptance — 2026-10-03
+
+139 automated tests pass. New coverage includes a root mod installing itself,
+transitive named version selection/backtracking, stable/prerelease behavior,
+conflict-before-download, same-name definition conflicts, changed input rejection,
+script opt-in/failure/cached output, public package snapshots, blocked remote local
+reads, one-file export/reimport, combined-profile resolution, source fallback,
+and locked named-constraint validation. Legacy install/recovery tests remain green.
+
+The real Cassel package resolves online and offline to the three expected named
+packages. No live game/profile deployment of 0.10 was attempted while Cyberpunk
+was running. The built plugin ZIP needs loading on a subsequent MO2 restart.
+
+
+## 2026-10-03 — current-profile resolution and one public format
+
+Supersedes earlier notes about source-only authoring formats and migration.
+The public CLI/UI accepts package.json definitions; source-only imports and remote
+recipe documents are rejected. Removed migration/export compatibility switches,
+the old author schema, and the standalone recipe authoring guide. Provider
+conversion and export publish the same package format after metadata preparation.
+Generated deployment records remain internal.
+
+The 144-test suite passes. Added coverage verifies compatible installed-version
+preference, explicit upgrades, required upgrades, manual dependency adoption,
+manual additions to an already managed profile, repeat-add folder reuse, provider
+conversion to packages, and rejection of removed formats. Existing rollback,
+shared-root ownership, local edits, plugin ordering, and offline tests pass.
+The plugin modules compile. A distributable ZIP is built from this source.
+
+This change has not been deployed into or exercised through a running MO2/game
+session. These results establish automated behavior, not live UI or gameplay
+acceptance. Existing duplicate active versions require reconciliation; the change
+prevents a new addition from creating another compatible dependency copy.

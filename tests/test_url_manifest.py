@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from mo2_modlists.core import PackError
 from mo2_modlists.acquisition import InputRequired
-from mo2_modlists.url_manifest import manifest_from_url, nexus_url_kind
+from mo2_modlists.url_manifest import source_plan_from_url as manifest_from_url, nexus_url_kind
 
 
 class URLManifestTests(unittest.TestCase):

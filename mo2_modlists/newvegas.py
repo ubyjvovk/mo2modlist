@@ -123,7 +123,13 @@ def resolve_plugins(document, lock, store, game):
                 if entry["class"] != "mo2-overlay":
                     raise PackError("New Vegas plugins must be installed as MO2 Data overlays")
                 winners[parts[1].casefold()] = (parts[1], package, entry)
-    if "plugins" in document:
+    addition = document.get("extensions", {}).get("profileAddPlugins")
+    if addition:
+        requested = [name for name in addition["enabled"] if name.casefold() not in addition["previousFiles"]
+                     or name.casefold() in winners or name.casefold() in vanilla]
+        excluded = set(addition["previousFiles"]) | {p.casefold() for p in requested}
+        requested.extend(value[0] for key, value in winners.items() if key not in excluded)
+    elif "plugins" in document:
         requested = document["plugins"]
     else:
         requested = ["FalloutNV.esm"] + [name for name in FNV_DLCS.values() if name.casefold() in vanilla]

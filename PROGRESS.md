@@ -1,5 +1,23 @@
 # Progress: 2026-09-26
 
+## 0.9.0 — manifest URLs and update checks, 2026-09-30
+
+- Added **Install manifest from URL…** for current/new profiles and URL-valued `--manifest` in CLI resolve/import/install/add. Public HTTPS JSON, GitHub file links, relative/transitive recipe URLs and temporary signed release-asset redirects are supported. Snapshots retain URL/resource digests, validate cached bytes, enforce JSON/schema/size/count/cycle limits, and never persist signed redirect queries. Remote metadata cannot read local archives or local Git repositories.
+- Added **Check manifest updates…**, review/re-import from that dialog, and `check-updates` CLI. Checks compare installed manifest/recipe hashes without changing installed pins or the baseline. Missing/invalid resources are failures, not an up-to-date result. Recipe-only changes are detected; changed root manifests do not require now-obsolete recipe URLs to remain available. Composing/exporting manifests retains tracked upstream URLs.
+- A plugin setting enables daily checks per active profile at startup/hourly ticks. Checks use a worker thread, deduplicate status-bar notices and log failures; the manual button is immediate. The official Python API documents no built-in Nexus update-action callback, so this is a companion checker. Applying still uses the existing addition workflow: it does not automatically delete top-level requests removed upstream or relax exact pins just because a new mod version exists.
+- **124 automated tests pass** (12 new URL/cache/update cases). Actual public GitHub transport fetched this repository's example JSON successfully; that mixed local-source example is not a remotely installable modpack. Real MO2 integration passed current-profile URL install, automatic detection and daily throttling, manual check → reviewed latest import, and fresh-profile URL import: `artifacts/add-ui-probe-url20260930d/probe-result.json`. Fixtures use deterministic metadata and an empty pack; the fresh fixture models empty Overwrite without moving/deleting prior gameplay saves. These checks establish UI/backend integration, not gameplay compatibility.
+- Host probes now use explicit exception-based checks because embedded Python can optimize away `assert`. Re-ran the current-profile add/repeat probe with effective checks (`artifacts/add-ui-probe-20260930e`) and it passed. Production unit tests run under the normal venv interpreter.
+- Deployed 0.9.0 to the Cyberpunk and New Vegas MO2 instances. Previous plugins are backed up under ignored `artifacts/plugin-backup-0.9-20260930-140159`; restart MO2 to load the new buttons and optional daily checker.
+
+## 0.8.0 — add to the current profile, 2026-09-30
+
+- Added **Add mod/modlist to current profile…** in MO2 and a two-step `add` CLI (resolve/review, then apply by plan digest). Every addition combines the requests and resolves the complete graph again. Alias collisions can replace, keep both, or cancel. Composition retains Collection rules, instructions and review provenance; contradictory constraints still block.
+- Fresh imports now retain source intent, origin, lock and deployment state. Legacy source imports recover top-level requests and embedded recipes from their locks; ordinary profiles capture recorded sources and prompt for unknown sources. Explicitly kept unmanaged mods stay enabled, outside the reproducibility claim, and cannot silently conflict with resolved files.
+- Unchanged mods reuse existing folders and user edits. Replacements get separate folders; prior folders, profile settings, saves, disabled entries and separators remain. Locally edited upgrades and conflicting shared-root consumers block. Obsolete tracked root files restore recorded originals. Snapshot checks reject stale reviews; profile-file publication and root writes have rollback and hard-process-exit recovery.
+- New Vegas additions preserve active/disabled choices and insert new plugins with declared-master ordering. Offline local additions can reuse cached archives after source archives/recipes are removed. Arbitrary fresh GitHub resolution still needs provider metadata.
+- Validation: **112 tests pass**, including 18 new cases covering composition, transitive conflicts, updates, unmanaged adoption, local edits, shared roots, obsolete-root restoration, CLI review/apply, New Vegas ordering, offline addition and hard process exit. Real MO2 2.5.2 UI add/repeat passed in disposable profiles (`artifacts/add-ui-probe-20260930b`, `…20260930c`, `…20260930d`); Qt choices ran on the owning thread, and repeat additions reused folders. The first UI probe caught a false stale-review rejection caused by MO2 rewriting comments/disabled entries; snapshots now compare enabled membership/order. Fixtures are overlay-only and do not establish game compatibility of arbitrary mod combinations. The user's running game/profile was not used for these tests.
+- Deployed 0.8.0 to the Cyberpunk and New Vegas MO2 instances; plugin backups are under ignored `artifacts/plugin-backup-0.8-20260930-114542`. Existing MO2 sessions need a restart to load the new tool. The running game was left open.
+
 ## 0.7.0 — New Vegas and real Gopher Collection import, 2026-09-27
 
 - Added New Vegas identity/DLC detection, conservative archive mappings, Data-relative MO2 overlays, root loader recipes and separate active plugin ordering. TES4 masters are checked during resolution and before deployment; explicit order is preserved, automatic order only satisfies masters. The real YUP ESM exposed extended `XXXX` subrecords, now handled with bounds checking and a regression test.
@@ -271,3 +289,50 @@ On 2026-09-26, launched `Source-backed - Roundtrip` through the disposable MO2 i
 - Source Play modlist SHA-256 still matches the recorded original. Development deployment and imports targeted only the disposable instance and separate game folder.
 
 The requested **profile -> modlist -> new profile, playable immediately** milestone is verified on this machine. This does not establish support for every MO2/game distribution, replace a long gameplay compatibility test, or complete the broader dependency-resolver stages in SPEC.md. Live authenticated Nexus acquisition remains an integration check for the next stage; this round trip used verified cached Nexus archives.
+
+
+## 2026-10-03 — unified packages (0.10.0)
+
+- Added npm-shaped package.json for both individual mods and dependency-only
+  collections. Sources, game constraints and declarative mappings are under mo2.
+- Named npm SemVer requirements use vendored semantic_version 2.10.0 and existing
+  resolvelib; backtracking, prerelease exclusion, and conflicting requirements
+  have dedicated tests. Source IDs remain acquisition/lock provenance.
+- Inline/referenced package catalogs share the same definition schema. Public URL
+  snapshots support relative package references and offline reuse.
+- Unified inputs lower to hash-bound internal recipes, preserving native Nexus
+  requirements and the existing verified deployment/rollback engine.
+- Added explicitly trusted scripts.install preparation; normal declarative mods
+  execute nothing. The cached prepared output supports offline locked installs.
+- Default export emits one package definition including dependency metadata;
+  --legacy retains source-only export for unresolved historical profiles. Added
+  migrate --single-mod to remove one-item wrapper manifests.
+- Current-profile additions re-resolve combined named constraints; CLI and plugin
+  use the same resolver. Package JSON UI defaults and trust prompts updated.
+- Baseline: 124 tests passed before edits. Current suite: 139 tests passed, with
+  15 new package tests; module compilation and distributable packaging passed.
+- Cassel Twins Survive migrated locally to one package.json. Its live GitHub ZIP
+  resolves with ArchiveXL and RED4ext, and offline package resolution also passed.
+  Its original 0.1.2 release bytes remain pinned; a local rebuild gets its own
+  generated local-source package definition. No game files changed: Cyberpunk was
+  running during this work.
+- Legacy Nexus URL/Collection ingestion still produces compatibility source data;
+  resolve plus migrate turns that into a unified package. The public npm registry
+  is not yet an acquisition provider. See PACKAGES.md for exact current limits.
+
+
+## 2026-10-03 — profile-first additions and package-only authoring
+
+- Rewrote README around motivation, operation, installation, then reference details.
+- Additions capture enabled profile contents before resolving. Compatible installed
+  versions are preferred; UI policy and CLI --upgrade opt into newer candidates.
+  Required replacements remain reviewable. Verified manual installs are adopted
+  into their existing folders using source and content identity.
+- Kept authored mod metadata unchanged when adding manually enabled packages.
+  Matching named constraints are intersected rather than creating aliases/copies.
+- Removed source-only public imports, standalone recipe authoring, --legacy,
+  migrate, and remote recipe loading. Provider ingestion and deployment plans are
+  internal; conversion/export output package.json. Replaced the public JSON schema
+  and architecture documentation. Earlier compatibility notes are superseded.
+- 144 tests pass, including public-format rejection and dependency-reuse regressions.
+  Built the plugin ZIP; no live MO2 deployment or gameplay test in this change.

@@ -5,7 +5,7 @@ import unittest
 import zipfile
 
 from mo2_modlists.acquisition import InputRequired
-from mo2_modlists.collections import collection_reference, convert_collection, read_collection, write_collection_manifest
+from mo2_modlists.collections import collection_reference, convert_collection, read_collection, write_collection_plan as write_collection_manifest
 
 
 class CollectionTests(unittest.TestCase):

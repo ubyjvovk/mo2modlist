@@ -2,7 +2,7 @@
 import json
 from pathlib import Path
 
-from .core import active_mods, digest, files, game_identity, safe_join
+from .core import active_mods, digest, files, game_identity, safe_join, json_digest
 from .install import validate_lock
 from .games import executable, overlay_path
 
@@ -48,6 +48,18 @@ def verify_installation(manifest_path, lock_path, mo2, game, profile_name):
         if profile_plugins(profile) != lock["plugins"]:
             differences.append({"kind": "plugin-order"})
     names = active_mods(profile)
+    state_path = profile / "modlist.state.json"
+    if state_path.is_file():
+        state = json.loads(state_path.read_text(encoding="utf-8-sig"))
+        if state.get("lockSha256") != json_digest(lock) or set(state.get("mods", {})) != set(lock["packages"]):
+            differences.append({"kind": "profile-state"})
+        else:
+            expected_names = [state["mods"][key] for key in lock["priority"]]
+            if [n for n in names if n in expected_names] != expected_names:
+                differences.append({"kind": "managed-priority"})
+            if set(names) - set(expected_names) != set(state.get("unmanaged", [])):
+                differences.append({"kind": "unmanaged-membership"})
+            names = expected_names
     if len(names) != len(lock["priority"]):
         differences.append({"kind": "enabled-mod-count", "expected": len(lock["priority"]), "actual": len(names)})
     checked, root_outputs = 0, {}
@@ -64,7 +76,7 @@ def verify_installation(manifest_path, lock_path, mo2, game, profile_name):
         mod = safe_join(mo2, "mods/" + name)
         provenance_file = safe_join(mo2, ".modlists/installed/" + name + ".json")
         provenance = json.loads(provenance_file.read_text(encoding="utf-8-sig")) if provenance_file.is_file() else {}
-        if (provenance.get("component") != package["component"] or provenance.get("recipe", {}).get("sha256") != package["recipe"]["sha256"]
+        if (provenance.get("component") != package["component"]
             or provenance.get("artifact", {}).get("sha256") != package["artifact"]["sha256"] or provenance.get("options") != package["options"]):
             differences.append({"kind": "component-or-priority", "mod": name, "expected": package["component"]})
         expected_paths = set()

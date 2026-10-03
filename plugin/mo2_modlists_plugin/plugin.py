@@ -1,8 +1,10 @@
 from pathlib import Path
+import json
+import time
 import traceback
 
 import mobase
-from PyQt6.QtCore import QThread, pyqtSignal, Qt
+from PyQt6.QtCore import QThread, QTimer, QCoreApplication, pyqtSignal, Qt, qWarning
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QPushButton, QFileDialog,
                             QInputDialog, QMessageBox, QProgressDialog)
@@ -40,12 +42,70 @@ class ModlistsTool(mobase.IPluginTool, mobase.IPluginFileMapper):
         mobase.IPluginFileMapper.__init__(self)
         self.organizer = None
         self.parent = None
+        self.update_worker = None
 
     def init(self, organizer):
         self.organizer = organizer
         from .import_ui import ImportController
         self.importer = ImportController(self)
+        organizer.onUserInterfaceInitialized(self.start_update_checks)
         return True
+
+    def start_update_checks(self, window):
+        self.update_window = window
+        self.update_timer = QTimer(window)
+        self.update_timer.setInterval(60 * 60 * 1000)
+        self.update_timer.timeout.connect(self.background_update_check)
+        self.update_timer.start()
+        QTimer.singleShot(5000, self.background_update_check)
+        QCoreApplication.instance().aboutToQuit.connect(self.stop_update_check)
+
+    def stop_update_check(self):
+        if self.update_worker is not None and self.update_worker.isRunning():
+            self.update_worker.requestInterruption()
+            self.update_worker.wait()
+
+    def background_update_check(self):
+        if self.update_worker is not None:
+            return
+        if not self.organizer.pluginSetting(self.name(), "check-manifest-updates"):
+            return
+        from .mo2_modlists.remote_manifests import check_manifest_updates
+        from .mo2_modlists.core import json_digest, write_json
+        try:
+            root, _, profile = self.paths()
+            manifest = root / "profiles" / profile / "modlist.json"
+            if not manifest.is_file() or not json.loads(manifest.read_text(encoding="utf-8-sig")).get("extensions", {}).get("remoteManifests"):
+                return
+            state_path = root / ".modlists/update-checks" / (json_digest(profile) + ".json")
+            previous = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
+            if 0 <= time.time() - previous.get("checkedAt", 0) < 24 * 60 * 60:
+                return
+        except (OSError, ValueError, TypeError, AttributeError, PackError) as exc:
+            qWarning("MO2 Modlists update check: " + str(exc))
+            return
+        worker = Worker(lambda report: check_manifest_updates(root / "profiles" / profile, progress=report), self.update_window)
+        self.update_worker = worker
+        def completed(results):
+            changed = [r for r in results if r["status"] == "available"]
+            notice = json_digest(changed) if changed else None
+            try:
+                write_json(state_path, {"checkedAt": time.time(), "results": results, "notice": notice})
+            except OSError as exc:
+                qWarning("MO2 Modlists: cannot save update-check status: " + str(exc))
+            if changed and notice != previous.get("notice"):
+                self.update_window.statusBar().showMessage(
+                    f"MO2 Modlists: {len(changed)} manifest update(s) for '{profile}'. Open Tools → Modlists → Check manifest updates to review.", 30000)
+            for result in results:
+                if result["status"] == "error":
+                    qWarning("MO2 Modlists update check: " + result["error"])
+        worker.result.connect(completed)
+        worker.error.connect(lambda error: qWarning("MO2 Modlists update check: " + error))
+        def finished():
+            self.update_worker = None
+            worker.deleteLater()
+        worker.finished.connect(finished)
+        worker.start()
 
     def name(self):
         return "MO2 Modlists"
@@ -83,11 +143,12 @@ class ModlistsTool(mobase.IPluginTool, mobase.IPluginFileMapper):
         return "Export source manifests; resolve and install pinned modlists and review Nexus Collections."
 
     def version(self):
-        return mobase.VersionInfo(0, 7, 0)
+        return mobase.VersionInfo(0, 10, 0)
 
     def settings(self):
         return [mobase.PluginSetting("archive-directories", "Additional download directories, separated by semicolons", ""),
-                mobase.PluginSetting("github-source-catalog", "Optional JSON catalog of known GitHub release URLs and archive hashes", "")]
+                mobase.PluginSetting("github-source-catalog", "Optional JSON catalog of known GitHub release URLs and archive hashes", ""),
+                mobase.PluginSetting("check-manifest-updates", "Check tracked manifest URLs daily while MO2 is open (never installs automatically)", True)]
 
     def archive_directories(self, root):
         extra = str(self.organizer.pluginSetting(self.name(), "archive-directories") or "")
@@ -125,23 +186,32 @@ class ModlistsTool(mobase.IPluginTool, mobase.IPluginFileMapper):
         dialog.setWindowTitle("MO2 Modlists — source manifests")
         dialog.resize(580, 260)
         layout = QVBoxLayout(dialog)
-        label = QLabel(f"Current profile: {profile}\n\nExport one modlist.json containing Nexus, GitHub or local archive references.\n"
+        label = QLabel(f"Current profile: {profile}\n\nUse one package.json for a mod or collection, with named dependencies and install instructions.\n"
                        "Unknown sources: choose a local archive, provide a URL, or explicitly skip.\n"
-                       "Import resolves sources and creates a separate profile. Unknown dependencies require a recipe.\n"
+                       "Install into a new profile or add to the current profile with dependency re-resolution.\n"
                        "Local edits and unrecorded installer choices are not exported.")
         label.setWordWrap(True)
         layout.addWidget(label)
-        export = QPushButton("Export modlist.json…")
+        export = QPushButton("Export package.json…")
         layout.addWidget(export)
         export.clicked.connect(lambda: self.export_clicked(dialog, root, game, profile))
         from_url = QPushButton("Create manifest from Nexus URL…")
         layout.addWidget(from_url)
         from_url.clicked.connect(lambda: self.importer.open_url(dialog, root, game))
-        install = QPushButton("Install modlist.json or lock…")
+        install = QPushButton("Install package.json or lock…")
         collection = QPushButton("Import Nexus Collection…")
         layout.addWidget(install)
         layout.addWidget(collection)
         install.clicked.connect(lambda: self.importer.open_manifest(dialog, root, game))
+        add = QPushButton("Add mod/modlist to current profile…")
+        layout.addWidget(add)
+        add.clicked.connect(lambda: self.importer.add_to_profile(dialog, root, game, profile))
+        remote = QPushButton("Install manifest from URL…")
+        layout.addWidget(remote)
+        remote.clicked.connect(lambda: self.importer.open_manifest_url(dialog, root, game, profile))
+        updates = QPushButton("Check manifest updates…")
+        layout.addWidget(updates)
+        updates.clicked.connect(lambda: self.importer.check_updates(dialog, root, game, profile))
         collection.clicked.connect(lambda: self.importer.open_collection(dialog, root, game))
         restore = QPushButton("Restore imported game-root files…")
         layout.addWidget(restore)
@@ -181,7 +251,7 @@ class ModlistsTool(mobase.IPluginTool, mobase.IPluginFileMapper):
             done(outcome["result"])
 
     def export_clicked(self, parent, root, game, profile):
-        destination, _ = QFileDialog.getSaveFileName(parent, "Export source manifest", "modlist.json", "Modlist (*.json)")
+        destination, _ = QFileDialog.getSaveFileName(parent, "Export package definition", "package.json", "Package (*.json)")
         if not destination:
             return
         manifest = Path(destination)
@@ -228,7 +298,8 @@ class ModlistsTool(mobase.IPluginTool, mobase.IPluginFileMapper):
                 for name, dependency in selections.items():
                     report("Recording " + name)
                     resolved[name] = local_dependency(Path(dependency["localSelection"]), manifest) if dependency and "localSelection" in dependency else dependency
-                return export_manifest(root, game, profile, manifest, resolved, report)
+                return export_manifest(root, game, profile, manifest, resolved, report,
+                    store=self.importer.store(root, archives, report), ask=self.importer.ask)
             def finished(result):
                 skipped = "\nSkipped: " + ", ".join(result["skipped"]) if result["skipped"] else ""
                 QMessageBox.information(parent, "Manifest exported",

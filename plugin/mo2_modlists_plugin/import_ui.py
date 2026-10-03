@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import QFileDialog, QInputDialog, QMessageBox, QLineEdit
 from .mo2_modlists.acquisition import ArtifactStore, InputRequired, json_request
 from .mo2_modlists.core import PackError, json_digest, write_json
 from .mo2_modlists.install import import_lock, validate_lock
-from .mo2_modlists.manifest import validate_manifest
+from .mo2_modlists.packages import validate_package as validate_manifest
 from .mo2_modlists.planning import resolve_manifest
 
 
@@ -67,13 +67,38 @@ class ImportController(QObject):
                 if not filename:
                     raise PackError("Archive selection cancelled")
                 answer = filename
+            elif kind == 'install-script':
+                choice = QMessageBox.question(parent, 'Trust executable install script', request['message'],
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                if choice != QMessageBox.StandardButton.Yes:
+                    raise PackError('Install script declined; no deployment plan was finalized')
+                answer = request['approvalId']
             elif kind == "dependency-metadata":
                 filename, _ = QFileDialog.getOpenFileName(parent,
-                    "Dependency recipe: " + " → ".join(request.get("chain", [])), "", "Recipe (*.json)")
+                    "Package definition: " + " → ".join(request.get("chain", [])), "", "Package (*.json)")
                 if not filename:
-                    raise PackError("Recipe selection cancelled; the plan remains incomplete")
+                    raise PackError("Package selection cancelled; the plan remains incomplete")
                 answer = Path(filename).resolve().as_posix()
-            elif kind in ("recipe-option", "file-conflict", "registry-recipe", "nexus-file", "nexus-dependency"):
+            elif kind == "existing-source":
+                from .mo2_modlists.manifest import local_dependency, source_from_url
+                choice, accepted = QInputDialog.getItem(parent, "Existing mod source", request["message"],
+                    ["Local archive", "Source URL", "Keep unmanaged"], 0, False)
+                if not accepted:
+                    raise PackError("Addition cancelled")
+                if choice == "Keep unmanaged":
+                    answer = None
+                elif choice == "Source URL":
+                    url, accepted = QInputDialog.getText(parent, "Mod source", "Nexus or GitHub release asset URL:")
+                    if not accepted:
+                        raise PackError("Addition cancelled")
+                    answer = {"source": source_from_url(url)}
+                else:
+                    filename, _ = QFileDialog.getOpenFileName(parent, "Existing mod archive", "", "Archives (*.zip *.7z)")
+                    if not filename:
+                        raise PackError("Addition cancelled")
+                    answer = local_dependency(Path(filename), Path(filename).parent / "manifest.json")
+                    answer["source"]["path"] = Path(filename).resolve().as_posix()
+            elif kind in ("recipe-option", "file-conflict", "registry-recipe", "nexus-file", "nexus-dependency", "replace-dependency"):
                 values = request.get("choices", request.get("owners"))
                 labels = [str(v) for v in request.get("labels", values)]
                 # Include index so equal display names remain distinguishable.
@@ -173,7 +198,7 @@ class ImportController(QObject):
 
     def open_manifest(self, parent, root, game, filename=None):
         if filename is None:
-            filename, _ = QFileDialog.getOpenFileName(parent, "Install source modlist", "", "Manifest or lock (*.json)")
+            filename, _ = QFileDialog.getOpenFileName(parent, "Install mod or collection package", "", "Package or lock (*.json)")
         if not filename:
             return
         path = Path(filename).resolve()
@@ -257,6 +282,101 @@ class ImportController(QObject):
             self.tool.run_job(parent, install, completed)
         self.tool.run_job(parent, plan, review)
 
+    def add_to_profile(self, parent, root, game, profile, filename=None):
+        from .mo2_modlists.profile_add import prepare_add
+        if filename is None:
+            filename, _ = QFileDialog.getOpenFileName(parent, "Add mod or modlist to " + profile, "", "Package (*.json)")
+        if not filename:
+            return
+        policy, accepted = QInputDialog.getItem(parent, "Dependency versions", "When adding to this profile:",
+            ["Reuse compatible installed versions", "Upgrade to newer compatible versions"], 0, False)
+        if not accepted:
+            return
+        self.tool.organizer.refresh(True)
+        archives = self.tool.archive_directories(root)
+        def plan(report):
+            return prepare_add(Path(filename).resolve(), self.store(root, archives, report), root, game, profile,
+                               ask=self.ask, progress=report, upgrade=policy.startswith("Upgrade"))
+        def review(update):
+            lock = json.loads(Path(update["lock"]).read_text(encoding="utf-8-sig"))
+            acknowledged = []
+            for requirement in lock.get("externalPrerequisites", []):
+                question = QMessageBox(QMessageBox.Icon.Question, "Required Collection instructions",
+                    requirement["text"] + "\n\nHave these steps been completed for this target?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, parent)
+                question.setTextFormat(Qt.TextFormat.PlainText)
+                if question.exec() != QMessageBox.StandardButton.Yes:
+                    return
+                acknowledged.append(requirement["id"])
+            text = (f"Update '{profile}' after resolving the combined dependency graph.\n\n"
+                    f"Add: {len(update['added'])}; replace: {len(update['replaced'])}; reuse: {len(update['reuse'])}; "
+                    f"remove from profile: {len(update['removed'])}.\n"
+                    f"Keep {len(update['unmanaged'])} unmanaged mods enabled. Existing mod folders and profile settings/saves are preserved.")
+            if update["rootPaths"]:
+                text += "\n\nPhysical game files are shared across profiles and instances. Changed files are backed up."
+            message = QMessageBox(QMessageBox.Icon.Question, "Review current-profile installation", text,
+                QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, parent)
+            message.setTextFormat(Qt.TextFormat.PlainText)
+            message.setDetailedText(json.dumps({k: v for k, v in update.items() if k != "snapshot"}, indent=2))
+            if message.exec() != QMessageBox.StandardButton.Ok:
+                return
+            def install(report):
+                return import_lock(Path(update["manifest"]), Path(update["lock"]), self.store(root, archives, report),
+                    root, game, profile, update=update, allow_root=True, acknowledged=acknowledged, progress=report)
+            def completed(result):
+                self.tool.organizer.refresh(False)
+                QMessageBox.information(parent, "Profile updated",
+                    f"Updated '{profile}'. Restart MO2 before launching to reload profile and plugin ordering.\n"
+                    "The combined manifest and lock are saved in the profile directory.")
+            self.tool.run_job(parent, install, completed)
+        self.tool.run_job(parent, plan, review)
+
+    def open_manifest_url(self, parent, root, game, profile, url=None):
+        from .mo2_modlists.remote_manifests import fetch_manifest, manifest_url
+        if url is None:
+            url, accepted = QInputDialog.getText(parent, "Install manifest from URL", "Public HTTPS JSON URL or GitHub file link:")
+            if not accepted or not url.strip():
+                return
+        try:
+            url = manifest_url(url)
+        except PackError as exc:
+            QMessageBox.warning(parent, "Manifest URL", str(exc))
+            return
+        target, accepted = QInputDialog.getItem(parent, "Manifest destination", "Install into:",
+            ["Current profile: " + profile, "New profile"], 0, False)
+        if not accepted:
+            return
+        def loaded(path):
+            if target == "New profile":
+                import uuid
+                working = root / ".modlists/url-imports" / uuid.uuid4().hex / "modlist.json"
+                write_json(working, json.loads(path.read_text(encoding="utf-8")))
+                self.open_manifest(parent, root, game, str(working))
+            else:
+                self.add_to_profile(parent, root, game, profile, str(path))
+        self.tool.run_job(parent, lambda report: fetch_manifest(url, root / ".modlists/source-cache", progress=report), loaded)
+
+    def check_updates(self, parent, root, game, profile):
+        from .mo2_modlists.remote_manifests import check_manifest_updates
+        def completed(results):
+            changed = [r for r in results if r["status"] == "available"]
+            errors = [r for r in results if r["status"] == "error"]
+            message = QMessageBox(QMessageBox.Icon.Information, "Manifest updates",
+                f"{len(changed)} changed manifest(s), {len(errors)} failed check(s), {len(results)} tracked.\n\n"
+                "Updates require re-resolution and review. Existing exact pins remain installed until you apply a change. "
+                "The addition workflow retains requests removed upstream; remove/reconcile those explicitly in your manifest.",
+                QMessageBox.StandardButton.Ok, parent)
+            message.setTextFormat(Qt.TextFormat.PlainText)
+            message.setDetailedText(json.dumps(results, indent=2))
+            apply = message.addButton("Review changed manifest…", QMessageBox.ButtonRole.ActionRole) if changed else None
+            message.exec()
+            if apply is not None and message.clickedButton() == apply:
+                labels = [f"{r['name']} — {r['url']}" for r in changed]
+                selected, accepted = QInputDialog.getItem(parent, "Review upstream change", "Manifest:", labels, 0, False)
+                if accepted:
+                    self.open_manifest_url(parent, root, game, profile, changed[labels.index(selected)]["url"])
+        self.tool.run_job(parent, lambda report: check_manifest_updates(root / "profiles" / profile, progress=report), completed)
+
     def open_restoration(self, parent, root, game):
         from .mo2_modlists.restoration import restoration_plan, restore_root
         operations = sorted(path.parent.name for path in (root / ".modlists").glob("*/journal.json"))
@@ -305,7 +425,7 @@ class ImportController(QObject):
         name, accepted = QInputDialog.getText(parent, "Manifest name", "Mod or pack name:")
         if not accepted or not name.strip():
             return
-        filename, _ = QFileDialog.getSaveFileName(parent, "Save source manifest", "modlist.json", "Manifest (*.json)")
+        filename, _ = QFileDialog.getSaveFileName(parent, "Save package", "package.json", "Manifest (*.json)")
         if not filename:
             return
         def saved(document):
@@ -314,7 +434,8 @@ class ImportController(QObject):
                 self.open_manifest(parent, root, game, filename)
         from .mo2_modlists.credentials import headers
         self.tool.run_job(parent, lambda report: manifest_from_url(url, Path(filename), name=name,
-            headers=headers("nexus"), ask=self.ask, progress=report), saved)
+            headers=headers("nexus"), ask=self.ask, progress=report,
+            store=self.store(root, self.tool.archive_directories(root), report), game=game), saved)
 
     def open_collection(self, parent, root, game, source_url=None):
         from .mo2_modlists.collections import (read_collection, fetch_collection, convert_collection, write_collection_manifest,
@@ -331,7 +452,7 @@ class ImportController(QObject):
             source, _ = QFileDialog.getOpenFileName(parent, "Full collection package", "", "Collection (*.7z *.zip *.json)")
             if not source:
                 return
-        output, _ = QFileDialog.getSaveFileName(parent, "Save converted source manifest", "modlist.json", "Manifest (*.json)")
+        output, _ = QFileDialog.getSaveFileName(parent, "Save converted package", "package.json", "Manifest (*.json)")
         if not output:
             return
         destination = Path(output)
@@ -376,7 +497,7 @@ class ImportController(QObject):
                     message = QMessageBox(parent)
                     message.setWindowTitle("Installer handoff — " + mod.get("name", alias))
                     message.setText("This entry has installer choices, patches or instructions that need an explicit handoff.\n"
-                        "Supply a prepared ZIP/7z containing the completed output and a recipe describing that archive, or retain this entry as unresolved.")
+                        "Supply a prepared ZIP/7z containing the completed output and a package definition describing that archive, or retain this entry as unresolved.")
                     message.setDetailedText(json.dumps({key: mod[key] for key in unsupported}, indent=2))
                     prepare = message.addButton("Use prepared archive…", QMessageBox.ButtonRole.ActionRole)
                     unresolved = message.addButton("Keep unresolved", QMessageBox.ButtonRole.ActionRole)
@@ -389,14 +510,14 @@ class ImportController(QObject):
                     archive, _ = QFileDialog.getOpenFileName(parent, "Prepared installer output", "", "Archives (*.zip *.7z)")
                     if not archive:
                         return
-                    recipe, _ = QFileDialog.getOpenFileName(parent, "Recipe for prepared archive", "", "Recipe (*.json)")
+                    recipe, _ = QFileDialog.getOpenFileName(parent, "Package for prepared archive", "", "Package (*.json)")
                     if not recipe:
                         return
                     note, accepted = QInputDialog.getText(parent, "Record completed handoff",
                         "Describe how you applied all listed installer choices, patches and instructions to this archive:")
                     if not accepted or not note.strip():
                         return
-                    decision.update(localSelection=archive, recipe=Path(recipe).resolve().as_posix(), handoff={
+                    decision.update(localSelection=archive, packageDefinition=Path(recipe).resolve().as_posix(), handoff={
                         "method": "prepared-archive", "collectionSha256": collection_sha, "handled": unsupported, "note": note})
                 elif known_source is None:
                     if mod.get("source", {}).get("type") == "bundle" and package_path:
@@ -430,6 +551,13 @@ class ImportController(QObject):
                     if "localSelection" in decision:
                         report("Verifying Collection source " + alias)
                         decision.update(local_dependency(Path(decision.pop("localSelection")), destination))
+                    if "packageDefinition" in decision:
+                        from .mo2_modlists.packages import compile_package
+                        compiled = compile_package(Path(decision.pop("packageDefinition")),
+                            self.store(root, self.tool.archive_directories(root), report), game=game,
+                            ask=self.ask, progress=report)
+                        prepared = json.loads(compiled.read_text(encoding="utf-8"))
+                        decision['recipe'] = next(iter(prepared['dependencies'].values()))['recipe']
                 return convert_collection(document, identity=identity, decisions=decisions)
             self.tool.run_job(parent, convert, save_draft)
         def save_draft(draft):
@@ -445,9 +573,10 @@ class ImportController(QObject):
                 message.exec()
                 return
             try:
-                write_collection_manifest(draft, destination)
+                self.tool.run_job(parent, lambda report: write_collection_manifest(draft, destination,
+                    store=self.store(root, self.tool.archive_directories(root), report), game=game,
+                    ask=self.ask, progress=report), lambda _: self.open_manifest(parent, root, game, str(destination)))
             except PackError as exc:
                 QMessageBox.warning(parent, "Collection conversion", str(exc))
                 return
-            self.open_manifest(parent, root, game, str(destination))
         self.tool.run_job(parent, load, review)

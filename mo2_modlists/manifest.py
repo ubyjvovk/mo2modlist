@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import urllib.parse
 
-from .core import (PackError, active_mods, digest, files, read_ini, runtime_noise, game_identity,
+from .core import (PackError, active_mods, digest, files, read_ini, runtime_noise, game_identity, json_digest,
                    safe_join, safe_relative, write_json)
 from .sources import github_source
 from .games import EXECUTABLES, detect_game, game_path, installed_dlcs
@@ -63,6 +63,9 @@ def validate_source(source, where="source"):
 
 
 def validate_manifest(document):
+    from .packages import is_package, validate_package
+    if is_package(document):
+        return validate_package(document)
     fields(document, ("schemaVersion", "name", "game", "dependencies"),
            ("fileOverrides", "registries", "plugins"), "manifest")
     if type(document["schemaVersion"]) is not int or document["schemaVersion"] != 1:
@@ -158,14 +161,22 @@ def profile_sources(mo2: Path, profile: str, archive_dirs=(), github_catalog=Non
     """Read explicit provenance only. Return None for unknown, never guess by name."""
     records = json.loads(github_catalog.read_text(encoding="utf-8-sig")) if github_catalog else []
     catalog = {r["Name"].casefold(): r for r in records}
+    profile_path = safe_join(mo2 / "profiles", profile)
+    current_packages = {}
+    if (profile_path / "modlist.state.json").is_file() and (profile_path / "modlist.lock.json").is_file():
+        state = json.loads((profile_path / "modlist.state.json").read_text(encoding="utf-8-sig"))
+        lock = json.loads((profile_path / "modlist.lock.json").read_text(encoding="utf-8-sig"))
+        if state.get("lockSha256") != json_digest(lock):
+            raise PackError("Profile deployment state differs from its lock")
+        current_packages = {name: lock["packages"][key] for key, name in state["mods"].items()}
     result = []
     for name in active_mods(safe_join(mo2 / "profiles", profile)):
         ini = read_ini(mo2 / "mods" / name / "meta.ini")
         general = ini["General"] if ini.has_section("General") else {}
         dependency = None
         provenance_path = safe_join(mo2, ".modlists/installed/" + name + ".json")
-        if provenance_path.is_file():
-            provenance = json.loads(provenance_path.read_text(encoding="utf-8-sig"))
+        if name in current_packages or provenance_path.is_file():
+            provenance = current_packages[name] if name in current_packages else json.loads(provenance_path.read_text(encoding="utf-8-sig"))
             artifact = provenance["artifact"]
             source = dict(artifact["source"])
             validate_source(source)
@@ -216,7 +227,7 @@ def profile_sources(mo2: Path, profile: str, archive_dirs=(), github_catalog=Non
     return result
 
 
-def export_manifest(mo2: Path, game: Path, profile: str, destination: Path,
+def capture_profile_plan(mo2: Path, game: Path, profile: str, destination: Path,
                     selections: dict, progress=lambda message: None):
     """Selections map each enabled mod name to its dependency, or explicit None=skip."""
     if destination.exists():
@@ -261,6 +272,12 @@ def export_manifest(mo2: Path, game: Path, profile: str, destination: Path,
     document = {"schemaVersion": 1, "name": profile,
                 "game": {"id": game_id, "dlc": sorted(installed_dlcs(game_identity(game)))},
                 "dependencies": dependencies}
+    installed_manifest = profile_path / "modlist.json"
+    if installed_manifest.is_file():
+        installed = json.loads(installed_manifest.read_text(encoding="utf-8-sig"))
+        remote = installed.get("extensions", {}).get("remoteManifests")
+        if remote:
+            document["extensions"] = {"remoteManifests": remote}
     if game_id == "newvegas":
         from .newvegas import profile_plugins
         from .games import FNV_DLCS
@@ -278,3 +295,29 @@ def export_manifest(mo2: Path, game: Path, profile: str, destination: Path,
     write_json(destination, document)
     return {"manifest": str(destination), "dependencies": len(dependencies), "skipped": skipped,
             "notice": "Only source references and file conflict rules were exported. Local edits, overwrite/root-only files and unrecorded installer choices are not included."}
+
+
+def export_manifest(mo2, game, profile, destination, selections, progress=lambda text: None, *, store=None, ask=None):
+    """Export only package.json; source capture is an internal preparation step."""
+    import uuid
+    from .packages import package_from_lock, package_from_sources
+    if destination.exists():
+        raise PackError('Export file already exists; choose a new filename')
+    temporary = mo2 / '.modlists/exports' / uuid.uuid4().hex / 'sources.json'
+    result = capture_profile_plan(mo2, game, profile, temporary, selections, progress)
+    document = json.loads(temporary.read_text(encoding='utf-8-sig'))
+    lock_path = mo2 / 'profiles' / profile / 'modlist.lock.json'
+    if lock_path.is_file():
+        try:
+            package = package_from_lock(document, json.loads(lock_path.read_text(encoding='utf-8-sig')))
+        except PackError:
+            if store is None:
+                raise
+            package = package_from_sources(document, destination, store, game, ask=ask, progress=progress)
+        else:
+            write_json(destination, package)
+    elif store is not None:
+        package = package_from_sources(document, destination, store, game, ask=ask, progress=progress)
+    else:
+        raise PackError('Package export needs a source cache to resolve installed package metadata')
+    return {**result, 'manifest': str(destination)}

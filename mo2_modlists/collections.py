@@ -355,10 +355,18 @@ silently discarded; its explicit recipe handoff is part of later resolution.
             "complete": not pending}
 
 
-def write_collection_manifest(draft, destination: Path):
+def write_collection_plan(draft, destination: Path):
     if draft["pending"]:
         raise InputRequired("collection-review", "Collection conversion has unresolved choices; nothing has been installed", pending=draft["pending"])
     if destination.exists():
         raise PackError("Manifest destination exists")
     write_json(destination, validate_manifest(draft["manifest"]))
+    return destination
+
+
+def write_collection_manifest(draft, destination: Path, *, store, game, ask=None, progress=lambda text: None):
+    if draft['pending']:
+        raise InputRequired('collection-review', 'Collection conversion has unresolved choices; nothing has been installed', pending=draft['pending'])
+    from .packages import package_from_sources
+    package_from_sources(draft['manifest'], destination, store, game, ask=ask, progress=progress)
     return destination

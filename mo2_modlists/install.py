@@ -1,4 +1,4 @@
-"""Deploy a resolved source lock to a fresh MO2 profile, with durable retry state."""
+"""Deploy resolved locks to fresh or reviewed existing profiles, with recovery."""
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -74,6 +74,8 @@ def validate_lock(lock, manifest):
 
 
 def _validate_lock(lock, manifest):
+    from .packages import locked_manifest
+    manifest = locked_manifest(lock, manifest)
     validate_manifest(manifest)
     if not isinstance(lock, dict):
         raise PackError("Expected a source-installation lock object")
@@ -237,6 +239,17 @@ def _validate_lock(lock, manifest):
     for alias, dependency in manifest["dependencies"].items():
         if not matches_dependency(dependency, packages[aliases[alias]]):
             raise PackError("Locked component does not satisfy manifest source: " + alias)
+    definitions = manifest.get('extensions', {}).get('packageDefinitions', {})
+    if definitions:
+        from .packages import validate_package, version, spec
+        by_name = {p['component']: p for p in packages.values()}
+        for name, definition in definitions.items():
+            validate_package(definition)
+            if name != definition['name'] or name not in by_name or by_name[name]['version'] != definition['version']:
+                raise PackError('Locked named package differs from its definition: ' + name)
+            for required, constraint in definition['dependencies'].items():
+                if required not in by_name or not spec(constraint).match(version(by_name[required]['version'])):
+                    raise PackError('Locked package violates named dependency: ' + required + ' ' + constraint)
     collection = manifest.get("extensions", {}).get("nexusCollection", {})
     if lock.get("collection", {}) != collection:
         raise PackError("Locked Collection constraints differ from the manifest")
@@ -256,16 +269,21 @@ def _validate_lock(lock, manifest):
             raise PackError("Lock has an unresolved file conflict: " + request["path"])
         return winner
     from .planning import priority_for
-    priority = priority_for(packages, aliases, manifest.get("fileOverrides", []), ask=locked_winner, collection=collection)
+    priority = priority_for(packages, aliases, manifest.get("fileOverrides", []), ask=locked_winner, collection=collection,
+                            preferred=manifest.get("extensions", {}).get("profilePriority", []))
     if priority != lock["priority"]:
         raise PackError("Locked priority contradicts the recorded file/Collection rules")
 
 
 def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, allow_root=False,
-                progress=lambda text: None, failure_hook=lambda phase: None, acknowledged=()):
+                progress=lambda text: None, failure_hook=lambda phase: None, acknowledged=(), update=None):
     document = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
     lock = json.loads(lock_path.read_text(encoding="utf-8-sig"))
     validate_lock(lock, document)
+    from .packages import locked_manifest
+    document = locked_manifest(lock, document)
+    if update is not None and (update["profileName"] != profile_name or update["lockSha256"] != json_digest(lock)):
+        raise PackError("Profile update review belongs to a different target or lock")
     required = {item["id"] for item in lock.get("externalPrerequisites", [])}
     if not required.issubset(set(acknowledged)):
         from .acquisition import InputRequired
@@ -294,11 +312,14 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
             effective[entry["path"].casefold()] = entry["sha256"]
             if entry["class"] == "game-root":
                 root_files[entry["path"].casefold()] = (key, entry)
-    if root_files and not allow_root:
+    if (root_files or (update and update.get("removeRoot"))) and not allow_root:
         raise PackError("Review and allow physical game-root deployment; it affects every profile using this game")
     for file in files(mo2 / "overwrite"):
         path = file.relative_to(mo2 / "overwrite").as_posix()
-        if not runtime_noise(path) and digest(file) != effective.get(game_path(identity["id"], path).casefold()):
+        canonical = game_path(identity["id"], path).casefold()
+        if update is not None and canonical not in effective:
+            continue
+        if not runtime_noise(path) and digest(file) != effective.get(canonical):
             raise PackError(f"Existing overwrite conflicts with this import: {path}")
     operation_id = json_digest({"lock": lock, "profile": profile_name, "game": str(game)})[:20]
     operation = safe_join(mo2, ".modlists/" + operation_id)
@@ -313,7 +334,11 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
             raise PackError("This operation's root files are being restored or have been restored; install into a new profile")
         journal["targetGame"] = str(game)
         journal["profileName"] = profile_name
-        if profile.exists():
+        if update is not None:
+            from .profile_add import assert_review_current
+            assert_review_current(update, mo2, game)
+            journal["update"] = update
+        if profile.exists() and update is None:
             if journal_path.exists() and journal["status"] == "publishing" and (profile / "modlist.lock.json").is_file():
                 published = json.loads((profile / "modlist.lock.json").read_text(encoding="utf-8"))
                 names = [journal["mods"][key] for key in lock["priority"]]
@@ -348,6 +373,20 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
         try:
             for index, key in enumerate(lock["priority"]):
                 package = packages[key]
+                if update is not None and key in update["reuse"]:
+                    name = update["reuse"][key]
+                    names.append(name)
+                    journal["mods"][key] = name
+                    provenance_path = safe_join(mo2, ".modlists/installed/" + name + ".json")
+                    if not provenance_path.is_file():
+                        write_json(provenance_path, {"artifact": package["artifact"], "component": package["component"],
+                            "options": package["options"], "sourceDocument": package["sourceDocument"],
+                            "recipe": package["recipe"], "recipeReference": package.get("recipeReference")})
+                    # Root entries may still need staging (for example after a
+                    # different instance restored its shared game files).
+                    if not any(e["class"] == "game-root" for e in package["outputs"]):
+                        checkpoint()
+                        continue
                 progress("Preparing " + package["component"])
                 artifact = store.acquire({"source": package["artifact"]["source"]},
                     Path(package["sourceDocument"]), locked=package["artifact"])
@@ -373,8 +412,12 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                     if actual != entry["sha256"] or temporary.stat().st_size != entry["size"]:
                         raise PackError("Extracted member differs from locked output")
                     os.replace(temporary, target)
+                reused = update is not None and key in update["reuse"]
                 name = journal["mods"].get(key) or installed_name(mo2, package, profile_name, names)
-                names.append(name)
+                if not reused:
+                    names.append(name)
+                if reused:
+                    continue
                 destination = safe_join(mo2, "mods/" + name)
                 if not destination.exists():
                     journal["mods"][key] = name
@@ -405,8 +448,30 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                 if resolve_plugins(document, lock, store, game) != lock["plugins"]:
                     raise PackError("Plugin order differs from the resolved archive/master plan")
             journal["status"] = "deploying"
+            if update is not None:
+                assert_review_current(update, mo2, game)
             checkpoint()
             require_game_closed(game)
+            for entry in update.get("removeRoot", []) if update else []:
+                target = safe_join(game, entry["path"])
+                canonical = entry["path"].casefold()
+                if canonical not in journal["root"]:
+                    backup_path = safe_join(operation, "b/" + str(len(journal["root"])))
+                    backup_path.parent.mkdir(exist_ok=True)
+                    shutil.copyfile(target, backup_path)
+                    journal["root"][canonical] = {"path": entry["path"], "backup": {"path": str(backup_path), "sha256": digest(backup_path)},
+                                                 "writtenSha256": entry["restore"]["sha256"] if entry.get("restore") else None}
+                    checkpoint()
+                if entry.get("restore"):
+                    original = Path(entry["restore"]["path"])
+                    if digest(original) != entry["restore"]["sha256"]:
+                        raise PackError("Obsolete root file backup changed")
+                    temporary = target.with_name(target.name + ".ml-" + operation_id)
+                    shutil.copyfile(original, temporary)
+                    os.replace(temporary, target)
+                else:
+                    target.unlink(missing_ok=True)
+                failure_hook("root-written")
             for canonical, (key, entry) in root_files.items():
                 target = safe_join(game, entry["path"])
                 if target.is_file() and digest(target) == entry["sha256"]:
@@ -431,38 +496,121 @@ def import_lock(manifest_path, lock_path, store, mo2, game, profile_name, *, all
                 failure_hook("root-written")
             stage_profile = safe_join(mo2, ".modlists/" + operation_id + "/profile")
             stage_profile.mkdir(exist_ok=True)
-            (stage_profile / "modlist.txt").write_text("# MO2 Modlists: highest priority first\n" + "".join("+" + name + "\n" for name in names), encoding="utf-8")
-            (stage_profile / "settings.ini").write_text("[General]\nLocalSaves=false\nLocalSettings=false\n", encoding="utf-8")
+            if update is not None:
+                from .profile_add import updated_modlist
+                content = updated_modlist(profile, update, names)
+            else:
+                content = "# MO2 Modlists: highest priority first\n" + "".join("+" + name + "\n" for name in names)
+                (stage_profile / "settings.ini").write_text("[General]\nLocalSaves=false\nLocalSettings=false\n", encoding="utf-8")
+            (stage_profile / "modlist.txt").write_text(content, encoding="utf-8")
             if identity["id"] == "newvegas":
                 from .newvegas import write_plugins
                 write_plugins(stage_profile, lock["plugins"])
             write_json(stage_profile / "modlist.lock.json", lock)
+            write_json(stage_profile / "modlist.json", document)
+            write_json(stage_profile / "modlist.origin.json", {"path": manifest_path.resolve().as_posix()})
+            write_json(stage_profile / "modlist.state.json", {"lockSha256": json_digest(lock),
+                "mods": dict(zip(lock["priority"], names)), "unmanaged": update["unmanaged"] if update else []})
             failure_hook("before-profile")
             profile.parent.mkdir(parents=True, exist_ok=True)
             journal["status"] = "publishing"
             checkpoint()
-            stage_profile.rename(profile)
+            if update is None:
+                stage_profile.rename(profile)
+            else:
+                journal["profileFiles"] = {}
+                for staged in stage_profile.iterdir():
+                    target = safe_join(profile, staged.name)
+                    backup = safe_join(operation, "profile-backup/" + staged.name)
+                    if target.is_file():
+                        backup.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(target, backup)
+                    journal["profileFiles"][staged.name] = {"before": digest(target) if target.is_file() else None,
+                                                          "after": digest(staged)}
+                checkpoint()
+                for staged in stage_profile.iterdir():
+                    target = safe_join(profile, staged.name)
+                    temporary = target.with_name(target.name + ".ml-update")
+                    shutil.copyfile(staged, temporary)
+                    os.replace(temporary, target)
+                    failure_hook("profile-file-written")
             failure_hook("profile-published")
             journal["status"] = "complete"
             checkpoint()
             return {"profile": str(profile), "mods": names, "rootFiles": len(root_files), "journal": str(journal_path)}
         except BaseException:
-            if profile.is_dir():
+            if profile.is_dir() and update is None:
                 # Publication was the final mutation. Do not roll back root files
                 # beneath a fully published profile if only the final journal write failed.
                 raise
+            if update is not None:
+                rollback_profile_files(operation, profile, journal)
             # Restore only root files still containing this operation's bytes.
             # Staged mod directories remain disabled and can be verified/reused.
             for item in reversed(list(journal["root"].values())):
                 target = safe_join(game, item["path"])
-                if target.is_file() and digest(target) == item["writtenSha256"]:
+                if (digest(target) if target.is_file() else None) == item["writtenSha256"]:
                     if item["backup"]:
                         backup = Path(item["backup"]["path"])
                         if digest(backup) != item["backup"]["sha256"]:
                             raise PackError("Root backup changed; inspect the operation before retrying")
-                        shutil.copyfile(backup, target)
+                        temporary = target.with_name(target.name + ".ml-rollback")
+                        shutil.copyfile(backup, temporary)
+                        os.replace(temporary, target)
                     else:
                         target.unlink()
             journal["status"] = "interrupted"
             checkpoint()
             raise
+
+
+def rollback_profile_files(operation, profile, journal):
+    for name, hashes in journal.get("profileFiles", {}).items():
+        target = safe_join(profile, name)
+        current = digest(target) if target.is_file() else None
+        if current == hashes["before"]:
+            continue
+        if current != hashes["after"]:
+            raise PackError("Profile was edited during interrupted update; preserve and reconcile: " + name)
+        if hashes["before"] is None:
+            target.unlink()
+        else:
+            backup = safe_join(operation, "profile-backup/" + name)
+            if digest(backup) != hashes["before"]:
+                raise PackError("Profile update backup changed: " + name)
+            temporary = target.with_name(target.name + ".ml-rollback")
+            shutil.copyfile(backup, temporary)
+            os.replace(temporary, target)
+
+
+def recover_profile_update(mo2, game, profile_name):
+    """Roll back interrupted profile publications before preparing another add."""
+    require_game_closed(game)
+    with installation_guard(mo2):
+        for path in (mo2 / ".modlists").glob("*/journal.json"):
+            journal = json.loads(path.read_text(encoding="utf-8-sig"))
+            if (not journal.get("update") or journal.get("profileName") != profile_name
+                    or journal.get("targetGame") != str(game.resolve())
+                    or journal["status"] in ("complete", "interrupted", "root-restored", "restoring-root")):
+                continue
+            operation = path.parent
+            rollback_profile_files(operation, safe_join(mo2, "profiles/" + profile_name), journal)
+            for item in reversed(list(journal.get("root", {}).values())):
+                target = safe_join(game, item["path"])
+                current = digest(target) if target.is_file() else None
+                original = item["backup"]["sha256"] if item["backup"] else None
+                if current == original:
+                    continue
+                if current != item["writtenSha256"]:
+                    raise PackError("Game-root file changed during interrupted update: " + item["path"])
+                if item["backup"]:
+                    backup = safe_join(operation, Path(item["backup"]["path"]).relative_to(operation).as_posix())
+                    if digest(backup) != original:
+                        raise PackError("Root update backup changed")
+                    temporary = target.with_name(target.name + ".ml-rollback")
+                    shutil.copyfile(backup, temporary)
+                    os.replace(temporary, target)
+                else:
+                    target.unlink()
+            journal["status"] = "interrupted"
+            write_json(path, journal)

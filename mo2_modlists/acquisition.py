@@ -171,6 +171,8 @@ class ArtifactStore:
                 return locked
         if source["type"] == "local-archive":
             path = reference_path(source["path"], declaring_file)
+            if not path.is_file() and expected and self.path(expected).is_file():
+                path = self.path(expected)
             if not path.is_file():
                 request = InputRequired("local-archive", "Supply the referenced local archive", source=source, expectedSha256=expected)
                 if self.manual_fetch is None:

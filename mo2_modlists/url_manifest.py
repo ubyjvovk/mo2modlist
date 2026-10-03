@@ -5,7 +5,7 @@ import urllib.parse
 from .core import PackError, write_json
 from .manifest import source_from_url, validate_manifest
 from .collections import (collection_reference, fetch_collection, read_collection,
-                          convert_collection, write_collection_manifest, bundled_dependency)
+                          convert_collection, write_collection_plan, bundled_dependency)
 
 
 def nexus_url_kind(url):
@@ -19,7 +19,7 @@ def nexus_url_kind(url):
     return 'mod'
 
 
-def manifest_from_url(url, output: Path, *, name=None, cache=None, headers=None,
+def source_plan_from_url(url, output: Path, *, name=None, cache=None, headers=None,
                       decisions=None, fetch=fetch_collection, provider=None, ask=None,
                       progress=lambda text: None):
     if output.exists():
@@ -62,5 +62,17 @@ def manifest_from_url(url, output: Path, *, name=None, cache=None, headers=None,
     draft = convert_collection(document, identity=identity, decisions=choices)
     if name:
         draft['manifest']['name'] = name
-    write_collection_manifest(draft, output)
+    write_collection_plan(draft, output)
     return draft['manifest']
+
+
+def manifest_from_url(url, output: Path, *, store, game, **kwargs):
+    import uuid
+    from .packages import package_from_sources
+    if output.exists():
+        raise PackError('Package destination exists; choose a new filename')
+    temporary = store.root / 'provider-preparation' / uuid.uuid4().hex / 'source.json'
+    document = source_plan_from_url(url, temporary, **kwargs)
+    return package_from_sources(document, output, store, game, ask=kwargs.get('ask'),
+                                progress=kwargs.get('progress', lambda text: None),
+                                single=nexus_url_kind(url) == 'mod')

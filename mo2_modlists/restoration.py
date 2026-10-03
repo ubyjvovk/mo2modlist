@@ -34,9 +34,11 @@ def restoration_plan(mo2, game, operation_id):
         for entry in lock["packages"][key]["outputs"]:
             if entry["class"] == "game-root":
                 permitted[entry["path"].casefold()] = entry["sha256"]
+    for entry in journal.get("update", {}).get("removeRoot", []):
+        permitted[entry["path"].casefold()] = entry["restore"]["sha256"] if entry.get("restore") else None
     actions, blockers = [], []
     for canonical, item in owned.items():
-        if canonical != item["path"].casefold() or permitted.get(canonical) != item["writtenSha256"]:
+        if canonical != item["path"].casefold() or canonical not in permitted or permitted[canonical] != item["writtenSha256"]:
             raise PackError("Journal root ownership differs from its installation plan")
         target = safe_join(game, item["path"])
         backup = item.get("backup")

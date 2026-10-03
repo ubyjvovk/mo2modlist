@@ -14,7 +14,7 @@ from mo2_modlists.inspection import verify_installation
 from mo2_modlists.install import import_lock, validate_lock
 from mo2_modlists.manifest import export_manifest, profile_sources
 from mo2_modlists.newvegas import profile_plugins, read_header
-from mo2_modlists.planning import resolve_manifest
+from mo2_modlists.planning import resolve_source_plan as resolve_manifest
 from mo2_modlists.url_manifest import nexus_url_kind
 from mo2_modlists.collections import collection_reference
 
@@ -69,7 +69,7 @@ class NewVegasTests(unittest.TestCase):
         output = self.root / "export.json"
         sources = profile_sources(self.mo2, "First", game_id="newvegas")
         export_manifest(self.mo2, self.game, "First", output, {x["name"]: x["dependency"] for x in sources})
-        self.assertEqual(json.loads(output.read_text())["plugins"], lock["plugins"])
+        self.assertEqual(json.loads(output.read_text())["mo2"]["plugins"], lock["plugins"])
         for p in self.root.glob("*.zip"):
             p.unlink()
         (self.root / "Mod.recipe.json").unlink()
@@ -85,6 +85,28 @@ class NewVegasTests(unittest.TestCase):
         with self.assertRaisesRegex(PackError, "missing or disabled masters"):
             self.resolve({"bad": dep})
         self.assertFalse(self.lockfile.exists())
+
+    def test_add_enables_new_plugins_and_preserves_disabled_existing_plugin(self):
+        from mo2_modlists.profile_add import prepare_add
+        self.resolve({"old": self.dep("Old", {"Old.esp": plugin("FalloutNV.esm"), "Disabled.esp": plugin("FalloutNV.esm")})},
+                     plugins=["FalloutNV.esm", "Old.esp", "Disabled.esp"])
+        import_lock(self.manifest, self.lockfile, self.store, self.mo2, self.game, "Play")
+        from mo2_modlists.newvegas import write_plugins
+        write_plugins(self.mo2 / "profiles/Play", ["FalloutNV.esm", "Old.esp"])
+        incoming = self.root / "add.json"
+        incoming.write_text(json.dumps({"schemaVersion": 1, "name": "add", "game": {"id": "newvegas", "dlc": []},
+            "dependencies": {"new": self.dep("New", {"New.esm": plugin("FalloutNV.esm", master=True),
+                "Feature.esp": plugin("New.esm", "Old.esp")})}}))
+        from mo2_modlists.packages import package_from_lock
+        # Provider plan preparation is internal; addition accepts a package definition.
+        source_doc = json.loads(incoming.read_text())
+        source_doc['plugins'] = ['FalloutNV.esm', 'New.esm']
+        incoming.write_text(json.dumps(source_doc))
+        prepared = resolve_manifest(incoming, self.store, self.game, self.root / 'incoming.lock.json')
+        incoming.write_text(json.dumps(package_from_lock(source_doc, prepared)))
+        plan = prepare_add(incoming, self.store, self.mo2, self.game, "Play")
+        import_lock(Path(plan["manifest"]), Path(plan["lock"]), self.store, self.mo2, self.game, "Play", update=plan)
+        self.assertEqual(profile_plugins(self.mo2 / "profiles/Play"), ["FalloutNV.esm", "New.esm", "Old.esp", "Feature.esp"])
 
     def test_explicit_order_and_disabled_plugin_are_preserved(self):
         dep = self.dep("Pack", {"A.esp": plugin("FalloutNV.esm"), "B.esp": plugin("FalloutNV.esm"),
